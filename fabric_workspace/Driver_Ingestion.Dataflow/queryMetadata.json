@@ -1,0 +1,130 @@
+{
+  "formatVersion": "202502",
+  "computeEngineSettings": {
+    "allowModernEvaluationEngine": true
+  },
+  "name": "Driver_Ingestion",
+  "queryGroups": [],
+  "documentLocale": "en-US",
+  "queriesMetadata": {
+    "Construction_GD": {
+      "queryId": "c71f1798-73d5-48cf-b696-268b0bf3e7d1",
+      "queryName": "Construction_GD",
+      "loadEnabled": false
+    },
+    "Construction_GD-World": {
+      "queryId": "2c667545-6a6f-4560-b9b4-8dad6294dc58",
+      "queryName": "Construction_GD-World",
+      "loadEnabled": false
+    },
+    "Project_GD": {
+      "queryId": "87f36c6b-e968-427f-a80b-cf2af0a62f3d",
+      "queryName": "Project_GD",
+      "loadEnabled": false
+    },
+    "Project_GD-World": {
+      "queryId": "fa00bbd7-9e35-4b3b-9554-fce731a21e21",
+      "queryName": "Project_GD-World",
+      "loadEnabled": false
+    },
+    "Macro_Econ_GD": {
+      "queryId": "c09f7c1e-2ef6-4753-8278-e86765e893d3",
+      "queryName": "Macro_Econ_GD",
+      "loadEnabled": false
+    },
+    "Macro_Econ_GD-World": {
+      "queryId": "4b037e1d-9a9e-485f-8c35-84a5d66eebaf",
+      "queryName": "Macro_Econ_GD-World",
+      "loadEnabled": false
+    },
+    "Macro_Sector_GD": {
+      "queryId": "6ba67b88-dbf7-4d31-8f57-c734763affd8",
+      "queryName": "Macro_Sector_GD",
+      "loadEnabled": false
+    },
+    "Macro_Sector_GD-World": {
+      "queryId": "cf72d97e-3939-43cb-9b19-25cf50e907ed",
+      "queryName": "Macro_Sector_GD-World",
+      "loadEnabled": false
+    },
+    "Macro_Trade_GD": {
+      "queryId": "4ca84feb-0a2b-437f-8240-ee080c6deff2",
+      "queryName": "Macro_Trade_GD",
+      "loadEnabled": false
+    },
+    "Macro_Trade_GD-World": {
+      "queryId": "50154372-a556-4d9d-882b-6d157d48e41d",
+      "queryName": "Macro_Trade_GD-World",
+      "loadEnabled": false
+    },
+    "Oxford": {
+      "queryId": "49a9a2f2-16b2-4a56-b7b0-dfaa03657d7e",
+      "queryName": "Oxford",
+      "loadEnabled": false
+    },
+    "Construction_Sectors_Predictive_GlobalData xlsx_DataDestination": {
+      "queryId": "90b4c851-b356-4d89-8bd6-11c233019008",
+      "queryName": "Construction_Sectors_Predictive_GlobalData xlsx_DataDestination",
+      "isHidden": true,
+      "loadEnabled": false
+    },
+    "Oxford-World": {
+      "queryId": "89ce383e-7800-4db3-abe4-c3466b66adc7",
+      "queryName": "Oxford-World",
+      "loadEnabled": false
+    },
+    "HVAC_GD": {
+      "queryId": "cd34997d-a488-4d02-92f7-0711ed32969c",
+      "queryName": "HVAC_GD",
+      "loadEnabled": false
+    },
+    "Macroeconomic_Economy_Predictive_GlobalData xlsx_DataDestination": {
+      "queryId": "826f03c9-a627-47bf-9451-7610db0a6e9d",
+      "queryName": "Macroeconomic_Economy_Predictive_GlobalData xlsx_DataDestination",
+      "isHidden": true,
+      "loadEnabled": false
+    },
+    "Macroeconomic_Sectors_Predictive_GlobalData xlsx_DataDestination": {
+      "queryId": "1d2ebbca-2ee4-4cef-acf0-681e1f7c69ad",
+      "queryName": "Macroeconomic_Sectors_Predictive_GlobalData xlsx_DataDestination",
+      "isHidden": true,
+      "loadEnabled": false
+    },
+    "Macroeconomic_Trade_Investment_Predictive_GlobalData xlsx_DataDestination": {
+      "queryId": "cfaeb748-b962-4360-86fe-9a77629c1ded",
+      "queryName": "Macroeconomic_Trade_Investment_Predictive_GlobalData xlsx_DataDestination",
+      "isHidden": true,
+      "loadEnabled": false
+    },
+    "Global_Data_HVAC_DataDestination": {
+      "queryId": "746d54b4-c503-4495-af2e-a24fef13ef7a",
+      "queryName": "Global_Data_HVAC_DataDestination",
+      "isHidden": true,
+      "loadEnabled": false
+    },
+    "HVAC_GD-World": {
+      "queryId": "b948f856-9be2-4ea3-94a7-2525af76e66e",
+      "queryName": "HVAC_GD-World",
+      "loadEnabled": false
+    },
+    "Project_GD_DataDestination": {
+      "queryId": "9892a372-1c61-4b37-9167-30ae5fd3e935",
+      "queryName": "Project_GD_DataDestination",
+      "isHidden": true,
+      "loadEnabled": false
+    },
+    "Oxford_DataDestination": {
+      "queryId": "56cf8ed4-4b32-4eeb-b707-c1d626447d29",
+      "queryName": "Oxford_DataDestination",
+      "isHidden": true,
+      "loadEnabled": false
+    }
+  },
+  "connections": [
+    {
+      "path": "Lakehouse",
+      "kind": "Lakehouse",
+      "connectionId": "{\"ClusterId\":\"9058bdaf-e3fb-4ee0-b6a5-6d02dc62e6c9\",\"DatasourceId\":\"c363c6a1-61bb-448e-9015-a3778be0f667\"}"
+    }
+  ]
+}

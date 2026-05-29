@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Lakehouse",
+    "displayName": "Sales_Forecasting"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "a0b7165c-dced-a844-4327-183e22746de3"
+  }
+}

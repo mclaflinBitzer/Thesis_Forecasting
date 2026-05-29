@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Dataflow",
+    "displayName": "Driver_Ingestion"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "7c0ef1fc-6122-b2eb-4346-cd142f22588a"
+  }
+}

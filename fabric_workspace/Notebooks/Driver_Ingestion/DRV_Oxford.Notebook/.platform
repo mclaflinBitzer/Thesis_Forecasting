@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "DRV_Oxford"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "91ab5ead-abb4-8b73-40aa-49d6cfe1d3a4"
+  }
+}

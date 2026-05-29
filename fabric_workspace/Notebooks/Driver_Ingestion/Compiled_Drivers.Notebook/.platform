@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "Compiled_Drivers"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "cda269f5-7d8f-8008-400d-56c78c932613"
+  }
+}

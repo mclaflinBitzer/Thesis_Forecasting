@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "DRV_Sector"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "9a443111-f1fb-a8c1-4c18-2ab98fb2c8e0"
+  }
+}
