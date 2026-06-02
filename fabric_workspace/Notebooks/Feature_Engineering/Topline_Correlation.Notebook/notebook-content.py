@@ -20,6 +20,273 @@
 # META   }
 # META }
 
+# MARKDOWN ********************
+
+# 
+# ## 7. Driver Classification
+# 
+# **Objective**
+# - Assign transformations based on driver characteristics.
+# 
+# **Analysis**
+# - Trend assessment
+# - Stationarity assessment
+# - Economic interpretation
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Driver classification
+#     - Driver
+#     - Category
+#     - Transformation
+#     - Forecast Availability
+# 
+# ### Categories
+# - Trending variables
+# - Rates / indices
+# - Event variables
+# - Commodity variables
+# 
+# **Thesis Discussion**
+# - Justification for transformation choices.
+# 
+# **Decision**
+# - Driver transformation framework.
+# 
+# ---
+# 
+# ## 8. Driver Feature Engineering
+# 
+# **Objective**
+# - Generate candidate explanatory variables.
+# 
+# **Analysis**
+# - Value features
+# - Lag features
+# - Lead features
+# - Rolling statistics
+# - Growth features
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Feature inventory
+#     - Driver
+#     - Feature Type
+#     - Forecast Horizon
+# 
+# ### Features
+# - Value
+# - Lag 3 / 6 / 12 / 18 / 24
+# - Lead 3 / 6 / 12
+# - Rolling Mean
+# - Rolling Std
+# - YoY Growth
+# 
+# **Thesis Discussion**
+# - Why lagged and leading relationships are expected.
+# 
+# **Decision**
+# - Feature library creation.
+# 
+# ---
+# 
+# ## 9. Target Transformation
+# 
+# **Objective**
+# - Align target and driver behavior.
+# 
+# **Analysis**
+# - Compare:
+#     - Level
+#     - YoY
+#     - Differenced
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Target transformation summary
+#     - Series
+#     - Selected Transformation
+#     - Reason
+# 
+# ### Visualizations
+# - Before vs After transformation
+# 
+# **Thesis Discussion**
+# - Why the selected transformation was chosen.
+# 
+# **Decision**
+# - Final modeling target.
+# 
+# ---
+# 
+# ## 10. Cross-Correlation Analysis
+# 
+# **Objective**
+# - Identify potential leading indicators.
+# 
+# **Analysis**
+# - Pearson correlation
+# - Spearman correlation
+# - Cross-correlation function (CCF)
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Correlation results
+#     - Series
+#     - Driver
+#     - Feature
+#     - Lag
+#     - Correlation
+# 
+# ### Visualizations
+# - Correlation heatmaps
+# - Lag profiles
+# - Driver ranking charts
+# 
+# **Metrics**
+# - Correlation magnitude
+# - Correlation stability
+# - Adjacent lag consistency
+# 
+# **Thesis Discussion**
+# - Strongest statistically meaningful relationships.
+# 
+# **Decision**
+# - Candidate driver pool.
+# 
+# ---
+# 
+# ## 11. Correlation Filtering
+# 
+# **Objective**
+# - Remove weak signals.
+# 
+# **Analysis**
+# - Correlation thresholding
+# - Statistical significance checks
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Driver screening results
+#     - Correlation
+#     - Pass / Fail
+# 
+# ### Visualizations
+# - Top driver rankings
+# 
+# **Decision**
+# - Shortlisted drivers.
+# 
+# ---
+# 
+# ## 12. Multicollinearity Filtering
+# 
+# **Objective**
+# - Remove redundant drivers.
+# 
+# **Analysis**
+# - Pairwise correlation
+# - Variance Inflation Factor (VIF)
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Driver correlation matrix
+# - VIF summary
+# 
+# ### Visualizations
+# - Feature correlation heatmap
+# 
+# **Thresholds**
+# - Pairwise Corr > 0.80
+# - VIF > 5
+# 
+# **Decision**
+# - Independent driver set.
+# 
+# ---
+# 
+# ## 13. Economic Logic Validation
+# 
+# **Objective**
+# - Ensure selected drivers are business-relevant.
+# 
+# **Analysis**
+# - Causal plausibility
+# - Forecast availability
+# - Domain expert review
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Driver validation summary
+#     - Statistical Score
+#     - Economic Score
+#     - Final Decision
+# 
+# **Thesis Discussion**
+# - Why selected drivers make business sense.
+# 
+# **Decision**
+# - Validated drivers.
+# 
+# ---
+# 
+# ## 14. Final Feature Selection
+# 
+# **Objective**
+# - Produce final model inputs.
+# 
+# **Analysis**
+# - Correlation strength
+# - Stability
+# - Multicollinearity
+# - Economic logic
+# - Model importance
+# 
+# **Outputs**
+# 
+# ### Tables
+# - Final feature selection summary
+#     - Series
+#     - Driver
+#     - Feature
+#     - Final Score
+# 
+# ### Visualizations
+# - Feature importance
+# - SHAP values
+# - Final driver rankings
+# 
+# **Metrics**
+# - Correlation
+# - Stability
+# - Forecast availability
+# - Economic relevance
+# - Model importance
+# 
+# **Thesis Discussion**
+# - Final justification for selected features.
+# 
+# **Decision**
+# - Final feature set for model training.
+
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # CELL ********************
 
 from pyspark.sql.types import *
