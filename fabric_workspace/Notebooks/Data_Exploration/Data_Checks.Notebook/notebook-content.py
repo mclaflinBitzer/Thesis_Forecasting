@@ -24,208 +24,230 @@
 
 # # Data Exploration & Quality Assessment Framework
 # 
+# ## Phase 1: Historical Data Evaluation
+# 
+# Purpose:
+# Determine what historical data should be retained for forecasting.
+# 
+# ---
+# 
 # ## 1. Structural Break Analysis
 # 
-# **Objective**
-# - Determine whether historical data represents a single stable process or multiple regimes.
+# ### Objective
+# Identify major regime changes within the historical series.
 # 
-# **Analysis**
+# ### Analysis
 # - Time series visualization
-# - Rolling mean / rolling standard deviation
-# - Structural break tests (CUSUM, Bai-Perron, Ruptures)
+# - Rolling mean
+# - Rolling standard deviation
+# - CUSUM test
+# - Bai-Perron test
+# - PELT / Ruptures
 # 
-# **Outputs**
+# ### Outputs
 # 
-# ### Tables
-# - Structural break summary
-#     - Series
-#     - Break date(s)
-#     - Confidence level
-#     - Business explanation
+# #### Tables
+# - Series
+# - Break date(s)
+# - Test statistic
+# - Confidence level
+# - Business explanation
 # 
-# ### Visualizations
+# #### Visualizations
 # - Time series with breakpoints
-# - Rolling mean plots
-# - Rolling variance plots
-# 
-# **Thesis Discussion**
-# - What breaks were identified?
-# - What business events explain them?
-# - Should pre-break history be retained?
-# 
-# **Decision**
-# - Candidate cutoff periods for historical data.
-# 
-# ---
-# 
-# ## 2. Historical Data Cutoff Selection
-# 
-# **Objective**
-# - Determine how much history should be retained for modeling.
-# 
-# **Analysis**
-# - Missing value assessment
-# - Data coverage analysis
-# - Structural break results
-# - Business relevance of older history
-# 
-# **Outputs**
-# 
-# ### Tables
-# - Data retention summary
-#     - Series
-#     - Original start date
-#     - Retained start date
-#     - Years retained
-#     - Justification
-# 
-# ### Visualizations
-# - Full history with retained modeling window highlighted
-# 
-# **Thesis Discussion**
-# - Why certain historical periods were excluded.
-# 
-# **Decision**
-# - Final modeling window per series.
-# 
-# ---
-# 
-# ## 3. Stationarity Assessment
-# 
-# **Objective**
-# - Determine whether transformations are required to avoid spurious correlations.
-# 
-# **Analysis**
-# - ADF test
-# - KPSS test
-# - Visual trend assessment
-# 
-# **Outputs**
-# 
-# ### Tables
-# - Stationarity results
-#     - Series
-#     - ADF Statistic
-#     - ADF p-value
-#     - KPSS Statistic
-#     - KPSS p-value
-#     - Stationary (Y/N)
-# 
-# ### Visualizations
-# - Original series
-# - Differenced series
-# - YoY transformed series
-# 
-# **Thesis Discussion**
-# - Which series are stationary?
-# - Which transformations are required?
-# 
-# **Decision**
-# - Levels vs YoY vs Differencing.
-# 
-# ---
-# 
-# ## 4. Stable Period Identification
-# 
-# **Objective**
-# - Identify periods suitable for forecasting.
-# 
-# **Analysis**
-# - Rolling mean stability
-# - Rolling variance stability
-# - Seasonal consistency
-# 
-# **Outputs**
-# 
-# ### Tables
-# - Stable period summary
-#     - Series
-#     - Stable start date
-#     - Stable end date
-#     - Stable duration
-# 
-# ### Visualizations
 # - Rolling mean
 # - Rolling standard deviation
 # 
-# **Thesis Discussion**
-# - Why the selected period is considered stable.
+# ### Thesis Discussion
+# - Were structural breaks detected?
+# - What business events explain them?
+# - Are multiple regimes present?
 # 
-# **Decision**
-# - Final training period.
+# ### Decision
+# - Candidate break dates.
+# 
+# ---
+# 
+# ## 2. Stable Period Identification
+# 
+# ### Objective
+# Identify periods exhibiting consistent statistical behavior.
+# 
+# ### Analysis
+# - Rolling mean stability
+# - Rolling variance stability
+# - Seasonal consistency
+# - Structural break alignment
+# 
+# ### Outputs
+# 
+# #### Tables
+# - Series
+# - Stable start date
+# - Stable end date
+# - Stable duration
+# 
+# #### Visualizations
+# - Rolling mean
+# - Rolling variance
+# - Stability overlays
+# 
+# ### Thesis Discussion
+# - Which periods exhibit stable behavior?
+# - Which periods should be avoided?
+# 
+# ### Decision
+# - Candidate stable periods.
+# 
+# ---
+# 
+# ## 3. Historical Data Cutoff Selection
+# 
+# ### Objective
+# Determine final modeling history.
+# 
+# ### Inputs
+# - Structural break results
+# - Stable period analysis
+# - Missing value analysis
+# - Data coverage assessment
+# - Business relevance assessment
+# 
+# ### Outputs
+# 
+# #### Tables
+# - Series
+# - Original start date
+# - Retained start date
+# - Years retained
+# - Justification
+# 
+# #### Visualizations
+# - Full history
+# - Final retained window highlighted
+# 
+# ### Thesis Discussion
+# - Why historical periods were removed.
+# - Impact of cutoff decisions.
+# 
+# ### Decision
+# - Final modeling window.
+# 
+# ---
+# 
+# At this point, all subsequent analysis uses only the retained modeling window.
+# 
+# ---
+# 
+# ## Phase 2: Time Series Understanding
+# 
+# Purpose:
+# Understand the characteristics of the retained series.
+# 
+# ---
+# 
+# ## 4. Exploratory Analysis
+# 
+# ### Objective
+# Understand statistical characteristics of the target series.
+# 
+# ### Analysis
+# - Missing values
+# - Demand distribution
+# - Variability analysis
+# - Growth analysis
+# - Intermittency analysis
+# 
+# ### Outputs
+# 
+# #### Tables
+# - Mean
+# - Std Dev
+# - CV
+# - Missing %
+# - Zero %
+# - CAGR
+# 
+# #### Visualizations
+# - Time series plots
+# - Histograms
+# - Boxplots
+# 
+# ### Thesis Discussion
+# - Demand behavior
+# - Data quality observations
+# 
+# ### Decision
+# - Supports transformation and feature engineering.
 # 
 # ---
 # 
 # ## 5. Time Series Decomposition
 # 
-# **Objective**
-# - Understand trend, seasonality, and residual behavior.
+# ### Objective
+# Understand trend and seasonality structure.
 # 
-# **Analysis**
+# ### Analysis
 # - STL decomposition
 # 
-# **Outputs**
+# ### Outputs
 # 
-# ### Tables
-# - Decomposition summary
-#     - Trend strength
-#     - Seasonal strength
-#     - Residual strength
+# #### Tables
+# - Trend strength
+# - Seasonal strength
+# - Residual strength
 # 
-# ### Visualizations
+# #### Visualizations
 # - Observed
 # - Trend
 # - Seasonal
 # - Residual
 # 
-# **Thesis Discussion**
-# - Dominant patterns present in each series.
+# ### Thesis Discussion
+# - Is trend dominant?
+# - Is seasonality dominant?
+# - How much unexplained noise exists?
 # 
-# **Decision**
-# - Supports transformation and feature engineering decisions.
-# 
-# ---
-# 
-# ## 6. Exploratory Analysis
-# 
-# **Objective**
-# - Understand target behavior prior to feature selection.
-# 
-# **Analysis**
-# - Demand distribution
-# - Variability analysis
-# - Missing values
-# - Growth analysis
-# 
-# **Outputs**
-# 
-# ### Tables
-# - Series profile summary
-#     - Mean
-#     - Std Dev
-#     - CV
-#     - Missing %
-#     - Zero %
-#     - CAGR
-# 
-# ### Visualizations
-# - Time series plots
-# - Histograms
-# - Boxplots
-# - Seasonal heatmaps
-# 
-# **Thesis Discussion**
-# - Demand characteristics and data quality observations.
-# 
-# **Decision**
-# - Supports feature engineering strategy.
+# ### Decision
+# - Supports transformation strategy.
 # 
 # ---
+# 
+# ## 6. Stationarity Assessment
+# 
+# ### Objective
+# Determine whether transformations are required.
+# 
+# ### Analysis
+# - ADF test
+# - KPSS test
+# - Trend assessment
+# 
+# ### Outputs
+# 
+# #### Tables
+# - ADF statistic
+# - ADF p-value
+# - KPSS statistic
+# - KPSS p-value
+# - Stationary flag
+# 
+# #### Visualizations
+# - Original series
+# - YoY transformed series
+# - Differenced series
+# 
+# ### Thesis Discussion
+# - Which series require transformation?
+# - Which transformation is appropriate?
+# 
+# ### Decision
+# - Levels vs YoY vs Differencing.
 
 
 # CELL ********************
 
-%pip install statsmodels
+%pip install statsmodels ruptures
 
 # METADATA ********************
 
@@ -248,6 +270,10 @@ from statsmodels.tsa.stattools import adfuller
 from pyspark.sql.utils import AnalysisException
 import numpy as np
 from statsmodels.tsa.seasonal import STL
+from statsmodels.stats.diagnostic import breaks_cusumolsresid
+import statsmodels.api as sm
+import ruptures as rpt
+
 
 # METADATA ********************
 
@@ -269,6 +295,7 @@ from statsmodels.tsa.seasonal import STL
 # - RAW_TABLE_NAME
 # - FILTERED_TABLE_NAME
 # - REGION_MAPPING_TABLE_NAME
+# - CUSUM_TABLE
 # 
 # **Part 2**
 # - model_data_mapping (contains the grouping columns and table name for the topline and middle models raw data)
@@ -309,75 +336,56 @@ MIDDLE_TARGET_COL = model_data_mapping["middle"]["target_col"]
 
 # MARKDOWN ********************
 
-# ## Overview
-# 
-# Dataset and the checks to be completed
-# 
-# 
-# **Filtered**
-# 
-# * Quality / Gaps
-# * Distribution
-# * Trend / Breaks
-# * Stationarity
-# 
-# **Topline**
-# 
-# * Distribution
-# * Trend / Breaks
-# * Stationarity
-# * Seasonality / STL
-# * ACF / PACF
-# * Cross Series
-# 
-# 
-# **Middle**
-# 
-# * Distribution
-# * Trend / Breaks
-# * Stationarity
-# * Seasonality / STL
-# * ACF / PACF
-# * Cross Series
+# ### Visual Exploration of time series
 
 # CELL ********************
 
-def changepoint_detection(df, series_name):
-    pdf = df.toPandas().sort_values("Date").reset_index(drop=True)
-    pdf["Quantity_log"] = np.log1p(pdf["Quantity"])
+## Read Middle & Topline table data
+middle_data = spark.read.table(MIDDLE_TABLE_NAME)
+topline_data = spark.read.table(TOPLINE_TABLE_NAME)
 
+## Store the distinct series of both middle & topline for later use
+middle_group = middle_data.select("series").distinct()
+topline_group = topline_data.select("series").distinct()
+
+all_groups = middle_group.unionByName(topline_group)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+def series_data_exploration(df, target_col):
+    df = df.fillna(0, target_col)
+
+    w_12 = (Window.partitionBy("series").orderBy("Date").rowsBetween(-11,0))
+    df = df.withColumn("Rolling_mean", avg(col("Quantity")).over(w_12))
+    df = df.withColumn("Rolling_std", stddev(col("Quantity")).over(w_12))
     
-    stl = STL(pdf["Quantity_log"], period=12).fit()
-    resid = stl.resid
-    resid_smooth = (pd.Series(resid).rolling(3, center=True).mean().bfill().ffill().to_numpy())
+    ## visualizations
+    groups = df.select("series").distinct().collect()
+    for group in groups:
+        serie = group[0]
+        filtered = df.filter(col("series")==serie)
+        display(filtered)
 
-    y = (resid_smooth - resid_smooth.mean())/resid_smooth.std()
+    return df
 
-    print(series_name, len(pdf), len(y))
-    algo = rpt.Pelt(model="l2").fit(y)
-    breaks = algo.predict(pen=100)
-    changepoint_indices = breaks[:-1]
-    changepoint_dates = pdf.iloc[changepoint_indices]["Date"].tolist()
+# METADATA ********************
 
-    return s, changepoint_dates
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
+# CELL ********************
 
-## code of implementation.
-topline_df = group_and_fill_data(filtered_actuals, TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
-topline_df = topline_df.withColumn("series", concat(*TOPLINE_GRP_COLS))
-series_list = [row["series"] for row in topline_df.select("series").distinct().collect()]
-
-results = []
-for s in series_list:
-    test = topline_df.where(col("series")==s).orderBy("Date").select("Date", "Quantity")
-    results.append((changepoint_detection(test,s)))
-
-changepoints_df = spark.createDataFrame(results, ["series","changepoint_dates"])
-
-changepoints_df = changepoints_df.withColumn("num_changepoints", size(col("changepoint_dates")))
-display(changepoints_df)
-
-changepoints_df.select(col("changepoint_dates")).collect()[0]
+middle_exploration = series_data_exploration(middle_data, MIDDLE_TARGET_COL)
+topline_exploration = series_data_exploration(topline_data, TOPLINE_TARGET_COL)
 
 # METADATA ********************
 
@@ -388,15 +396,42 @@ changepoints_df.select(col("changepoint_dates")).collect()[0]
 
 # MARKDOWN ********************
 
-# ### Visual Exploration of time series
+# ### CUSUM test
+# detects gradual drift
 
 # CELL ********************
 
-middle_data = spark.read.table(MIDDLE_TABLE_NAME)
-middle_data_filled = middle_data.fillna(0, "Quantity")
+def cusum_test(df, target_col):
 
-topline_data = spark.read.table(TOPLINE_TALBE_NAME)
-topline_data_filled = middle_data.fillna(0,"Quantity")
+    results = []
+
+    groups = df.select("series").distinct().collect()
+    for group in groups:
+        serie = group[0]
+        filtered = df.filter(col("series")==serie).orderBy("Date")
+        
+        filtered_df = filtered.select(target_col).toPandas()
+        series = filtered_df[target_col].dropna()
+
+        if len(series) < 20:
+            continue
+
+        X = sm.add_constant(np.arange(len(series)))
+
+        model = sm.OLS(series, X).fit()
+
+        stat, p_value, crit = breaks_cusumolsresid(
+            model.resid,
+            ddof=int(model.df_model)
+        )
+
+        results.append((
+            serie,
+            float(stat),
+            float(p_value)
+        ))
+
+    return results
 
 # METADATA ********************
 
@@ -407,8 +442,8 @@ topline_data_filled = middle_data.fillna(0,"Quantity")
 
 # CELL ********************
 
-display(middle_data_filled.select("Product_Category").distinct().orderBy("series"))
-display(middle_data_filled.where(col("series").contains("SCROLLS")))
+middle_cusum = cusum_test(middle_data, MIDDLE_TARGET_COL)
+topline_cusum = cusum_test(topline_data, TOPLINE_TARGET_COL)
 
 # METADATA ********************
 
@@ -419,8 +454,129 @@ display(middle_data_filled.where(col("series").contains("SCROLLS")))
 
 # CELL ********************
 
-display(topline_data_filled.select("Product_Category").distinct().orderBy("series"))
-display(topline_data_filled)
+all_cusum = middle_cusum + topline_cusum
+
+cusum_df_schema = StructType([
+    StructField("series", StringType(), True),
+    StructField("cusum_residuals_stat", DoubleType(), True),
+    StructField("P_Value", DoubleType(), True)
+])
+
+cusum_df = spark.createDataFrame(all_cusum, schema=cusum_df_schema)
+
+cusum_df = cusum_df.withColumn("Structual_Break_Flag", when(col("P_Value")<.05,"Yes").otherwise("No"))
+
+joined_cusum = all_groups.join(cusum_df, "series", how='leftouter')
+
+joined_cusum = joined_cusum.withColumn("Structual_Break_Flag", when(col("P_Value").isNull(),"Not enough data to process").otherwise(col("Structual_Break_Flag")))
+
+joined_cusum.write.format("delta").mode("overwrite").saveAsTable(CUSUM_TABLE)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### Pelt test
+# detects breakpoints
+
+# CELL ********************
+
+def pelt_test(
+    df,
+    target_col="Quantity",
+    penalty=10
+):
+
+    results = []
+
+    groups = (
+        df
+        .select("series")
+        .distinct()
+        .collect()
+    )
+
+    for group in groups:
+
+        serie = group[0]
+
+        filtered = (
+            df
+            .filter(col("series") == serie)
+            .orderBy("Date")
+        )
+
+        pdf = filtered.select(
+            "Date",
+            target_col
+        ).toPandas()
+
+        pdf = pdf.dropna(subset=[target_col]).reset_index(drop=True)
+
+
+        signal = (
+            pdf[target_col]
+            .values
+        )
+
+        print(f"{serie} has {len(signal)} observations")
+
+        if len(signal) < 24:
+            continue
+
+        algo = rpt.Pelt(
+            model="rbf"
+        )
+
+        breaks = (
+            algo
+            .fit(signal)
+            .predict(pen=penalty)
+        )
+
+        for b in breaks[:-1]:
+
+            results.append(
+                (
+                    serie,
+                    pdf.iloc[b]["Date"]
+                )
+            )
+
+    print("-"*80)
+    return results
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_pelt = pelt_test(topline_data, TOPLINE_TARGET_COL, 3)
+middle_pelt = pelt_test(middle_data, MIDDLE_TARGET_COL, 3)
+
+all_pelt_results = topline_pelt + middle_pelt
+
+pelt_df_schema = StructType([
+    StructField("series", StringType(), True),
+    StructField("Structual_Change_Date", DateType(), True),
+])
+
+pelt_df = spark.createDataFrame(all_pelt_results, schema=pelt_df_schema)
+
+all_pelt_df = all_groups.join(pelt_df, "series", how="leftouter")
+
+all_pelt_df = all_pelt_df.withColumn("Pelt_Flag", when(col("Structual_Change_Date").isNull(),"Pelt alg identified no change point").otherwise("Pelt identified change point"))
+
+all_pelt_df.write.format("delta").mode("overwrite").saveAsTable(PELT_TABLE)
 
 # METADATA ********************
 
@@ -471,9 +627,7 @@ observation_extraction(middle_data)
 
 # MARKDOWN ********************
 
-# # 2. Historical Cutoff Date Selection
-# 
-# #### Rolling stats for cutoff date selection/identification
+# # 2. Stable Period Identification
 
 # CELL ********************
 
@@ -497,31 +651,11 @@ def time_series_stats(df, group_cols, target_col):
     df_stable = df_stable.withColumn("stable_run", sum("is_stable").over(Window.partitionBy(group_cols).orderBy("Date").rowsBetween(-12,0)))
 
     return df_stable
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 top_df = group_and_fill_data(filtered_actuals,TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
 df_stats = time_series_stats(top_df, TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
 df_stats = df_stats.withColumn("longest_stable_run", 
                                 max(col("stable_run")).over(Window.partitionBy(TOPLINE_GRP_COLS)))
 display(df_stats)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 df_with_cutoff = df_stats.withColumn("min_cutoff_date",
                                     min(when(col("stable_run")==col("longest_stable_run"), col("Date")))\
                                     .over(Window.partitionBy(TOPLINE_GRP_COLS)))\
@@ -543,123 +677,18 @@ display(df_stats.groupBy(TOPLINE_GRP_COLS).agg(max(col("stable_run"))))
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# MARKDOWN ********************
 
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-filtered_df = spark.read.table(FILTERED_TABLE_NAME)
-display(filtered_df.limit(5))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# # 3. Historical Cutoff Date Selection
+# * missing value assessment
+# * data coverage analysis
+# * latest date allowed set based on data needed for models
+# * cutoff date setting per series
 
 # MARKDOWN ********************
 
 # ### Data Quality / Completeness
-# missing value audit (gaps, zero inflation, structural NaNs)
-# series length distribution
+# missing value audit (gaps, zero inflation, structural NaNs), series lengths distribution
 
 # CELL ********************
 
@@ -734,27 +763,18 @@ for model_name, cfg in model_data_mapping.items():
         date_col="Date"
     )
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-dq_results['middle'].select("Product_Category","Region").distinct().count()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 display(dq_results['topline'].orderBy(desc("missing_count")).limit(35))
+display(dq_results['middle'].orderBy(desc("missing_count")))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # METADATA ********************
 
@@ -765,63 +785,39 @@ display(dq_results['topline'].orderBy(desc("missing_count")).limit(35))
 
 # MARKDOWN ********************
 
-# ### Distribution Analysis
-# Histogram + KDE of target values
-# log scale
+# # Use data w/ cutoff date applied
+
+# MARKDOWN ********************
+
+# # 4. Exploratory Analysis
+# understand target behavior prior to feature selection
 
 
-# CELL ********************
+# MARKDOWN ********************
 
-topline_table = model_data_mapping['topline']['table_name']
-topline_group_cols = model_data_mapping['topline']['grouping_cols']
-topline_target_col = model_data_mapping['topline']['target_col']
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# #### Distribution Analysis 
+# Histogram + KDE of target values log scaled
 
 # CELL ********************
 
-topline = spark.read.table(topline_table)
-groups = topline.select(topline_group_cols).distinct().collect()
+def histogram_viz(groups, group_cols df):
 
-# METADATA ********************
+    for row in groups:
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+        filters = [col(c) == row[c] for c in group_cols]
+        subdf = df.filter(reduce(lambda a, b: a & b, filters))
 
-# CELL ********************
-
-for row in groups:
-
-    filters = [col(c) == row[c] for c in topline_group_cols]
-    subdf = df.filter(reduce(lambda a, b: a & b, filters))
-
-    pdf = subdf.select(topline_target_col).toPandas()
-    
-    # compute log transform
-    pdf["log_target"] = np.log1p(pdf[topline_target_col].clip(lower=0) + 1e-6)
-    
-    # plot
-    sns.histplot(pdf["log_target"], kde=True)
-    plt.title(f"Log Distribution for {row.asDict()}")
-    plt.show()
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+        pdf = subdf.select(topline_target_col).toPandas()
+        
+        # compute log transform
+        pdf["log_target"] = np.log1p(pdf[topline_target_col].clip(lower=0) + 1e-6)
+        
+        # plot
+        sns.histplot(pdf["log_target"], kde=True)
+        plt.title(f"Log Distribution for {row.asDict()}")
+        plt.show()
+histogram_viz(topline_groups, TOPLINE_GRP_COLS, topline)
+histogram_viz(middle_groups, MIDDLE_GRP_COLS, middle)
 plt.figure(figsize=(10,6))
 
 sns.histplot(
@@ -837,25 +833,6 @@ plt.ylabel("Frequency")
 
 plt.show()
 
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Stationarity
-# ADF
-# KPSS
-# Phillips Perron
-
-# CELL ********************
-
-topline_group_cols
-
 # METADATA ********************
 
 # META {
@@ -865,7 +842,6 @@ topline_group_cols
 
 # CELL ********************
 
-groups
 
 # METADATA ********************
 
@@ -873,113 +849,6 @@ groups
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
-
-# CELL ********************
-
-test = groups[0][0]
-
-df_filter = topline.filter(col(topline_group_cols[0])==test)
-display(df_filter.limit(5))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-adf_results.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting/Data_Exploration/Topline_ADF")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-results = []
-
-for row in groups:
-
-    product_category = row[0]
-
-    series = (
-        topline
-        .filter(col(topline_group_cols[0]) == product_category)
-        .select(topline_target_col)
-        .toPandas()[topline_target_col]
-        .dropna()
-    )
-
-    adf_stat, p_value, *_ = adfuller(series)
-
-    results.append((
-        product_category,
-        adf_stat,
-        p_value,
-        "Stationary" if p_value < 0.05 else "Non-Stationary"
-    ))
-
-results_clean = [
-    (
-        str(r[0]),
-        float(r[1]),
-        float(r[2]),
-        str(r[3])
-    )
-    for r in results
-]
-
-adf_schema = StructType([
-    StructField("Product_Category", StringType(), False),
-    StructField("ADF_Statistic", DoubleType(), False),
-    StructField("P_Value", DoubleType(), False),
-    StructField("Stationarity", StringType(), False)
-])
-
-adf_results = spark.createDataFrame(
-    results_clean, schema=adf_schema)
-
-return adf_results
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-for row in groups:
-    df_filter = topline.filter(col(topline_group_cols[0]) == row[0])
-    target = df_filter.select(topline_target_col)
-
-    pdf = target.toPandas()
-    
-    series = pdf[topline_target_col].dropna()
-    result = adfuller(series)
-
-    print(f"Current Product Category is: {row[0]}")
-    print(f"the result of the stationary test is: {result[0]}")
-    print(f"p-value: {result[1]}")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Seasonality & Decomposition
-# STL decomposition
 
 # CELL ********************
 
@@ -993,5 +862,125 @@ for row in groups:
 
 # MARKDOWN ********************
 
-# ### Series Analysis
-# series classification: stable / trending / seasonal / intermittent
+# # 5. Time Series Decomposition
+# * STL decomposition
+# * table of trend, seasonal, residual data
+# * visualizations of original, trend, seasonal, residual data
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# # 6. Stationarity
+# ADF, KPSS, Phillips Perron
+
+# CELL ********************
+
+def adf_test(groups, group_cols, df):
+    results = []
+
+    for row in groups:
+
+        record = row[0]
+
+        series = (
+            df
+            .filter(col(group_cols[0]) == record)
+            .select(group_cols)
+            .toPandas()[group_cols]
+            .dropna()
+        )
+
+        adf_stat, p_value, *_ = adfuller(series)
+
+        results.append((
+            record,
+            adf_stat,
+            p_value,
+            "Stationary" if p_value < 0.05 else "Non-Stationary"
+        ))
+
+    results_clean = [
+        (
+            str(r[0]),
+            float(r[1]),
+            float(r[2]),
+            str(r[3])
+        )
+        for r in results
+    ]
+
+    adf_schema = StructType([
+        StructField("Product_Category", StringType(), False),
+        StructField("ADF_Statistic", DoubleType(), False),
+        StructField("P_Value", DoubleType(), False),
+        StructField("Stationarity", StringType(), False)
+    ])
+
+    adf_results = spark.createDataFrame(
+        results_clean, schema=adf_schema)
+
+    return adf_results
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_adf_results = adf_test(middle_groups, MIDDLE_GRP_COLS, middle)
+topline_adf_results = adf_test(topline_groups, MIDDLE_GRP_COLS, topline)
+
+display(middle_adf_results)
+display(topline_adf_results)    
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_adf_results.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting/Data_Exploration/Middle_ADF")
+topline_adf_results.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting/Data_Exploration/Topline_ADF")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }

@@ -33,15 +33,9 @@ model_data_mapping = {
     }
 } 
 
-# METADATA ********************
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+CUSUM_TABLE = "Sales_Forecasting.Data_Exploration.structual_break_cusum"
+PELT_TABLE = "Sales_Forecasting.Data_Exploration.pelt_break"
 
 # METADATA ********************
 
