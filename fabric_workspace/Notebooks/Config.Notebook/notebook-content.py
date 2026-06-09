@@ -110,8 +110,22 @@ model_data_mapping = {
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# ### HISTORICAL CUTOFF DATES
+
 # CELL ********************
 
+HISTORICAL_CUTOFF_DATES = {
+    "ALU": "01-03-2019",
+    "AVP_CDU": "01-05-2016",
+    "HEXPV": "01-01-2018",
+    "MAERSK_COMPRESSOR": "01-02-2020",
+    "MAERSK_ELECTRONICS": "01-10-2019",
+    "PISTON": "01-10-2016",
+    "SCREWS": "01-04-2020",
+    "SCROLLS": "01-06-2015"
+}
 
 # METADATA ********************
 

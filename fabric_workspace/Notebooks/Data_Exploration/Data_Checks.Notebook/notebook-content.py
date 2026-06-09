@@ -258,6 +258,17 @@
 
 # CELL ********************
 
+%pip install arch
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from pyspark.sql.functions import col
@@ -273,7 +284,10 @@ from statsmodels.tsa.seasonal import STL
 from statsmodels.stats.diagnostic import breaks_cusumolsresid
 import statsmodels.api as sm
 import ruptures as rpt
-
+from statsmodels.tsa.stattools import kpss
+from arch.unitroot import PhillipsPerron
+from matplotlib.ticker import MaxNLocator, AutoMinorLocator
+from matplotlib.ticker import PercentFormatter
 
 # METADATA ********************
 
@@ -296,9 +310,25 @@ import ruptures as rpt
 # - FILTERED_TABLE_NAME
 # - REGION_MAPPING_TABLE_NAME
 # - CUSUM_TABLE
+# - ROLLING_STATS_TABLE
+# - RAW_OBS
+# - STABLE_STATS_TABLE 
+# - STABLE_RUNS_TABLE 
+# - BASE_DQ_TABLE 
+# - HISTORICAL_CUTOFF_DATES
+# 
 # 
 # **Part 2**
 # - model_data_mapping (contains the grouping columns and table name for the topline and middle models raw data)
+# 
+# - TOPLINE_CUTOFF_DATA_TABLE
+# - MIDDLE_CUTOFF_DATA_TABLE
+# - CUTOFF_DQ_TABLE
+# - STL_METRICS_TABLE
+# - ADF_STATS_TABLE 
+# - KPSS_STATS_TABLE 
+# - PP_STATS_TABLE 
+# - STATIONARY_STATS_TABLE
 
 # CELL ********************
 
@@ -386,6 +416,10 @@ def series_data_exploration(df, target_col):
 
 middle_exploration = series_data_exploration(middle_data, MIDDLE_TARGET_COL)
 topline_exploration = series_data_exploration(topline_data, TOPLINE_TARGET_COL)
+
+all_exploration = topline_exploration.unionByName(middle_exploration.select("series","Date","Quantity","Rolling_mean","Rolling_std"), True)
+
+all_exploration.write.format("delta").mode("overwrite").saveAsTable(ROLLING_STATS_TABLE)
 
 # METADATA ********************
 
@@ -602,9 +636,11 @@ def observation_extraction(df):
     joined = df_obs_stats.crossJoin(global_stats)
 
 
-    display(joined)
+    joined = joined.withColumn("observation_pct", round(col("count_observations")/col("max_observation"),2))
 
-    display(df_obs_stats.groupBy("count_observations").agg(count("count_observations")))
+    
+
+    return joined
 
 # METADATA ********************
 
@@ -615,8 +651,11 @@ def observation_extraction(df):
 
 # CELL ********************
 
-observation_extraction(topline_data)
-observation_extraction(middle_data)
+topline_observations = observation_extraction(topline_data)
+middle_observations = observation_extraction(middle_data)
+
+all_observations_raw = topline_observations.unionByName(middle_observations)
+all_observations_raw.write.format("delta").mode("overwrite").saveAsTable(RAW_OBS)
 
 # METADATA ********************
 
@@ -632,12 +671,12 @@ observation_extraction(middle_data)
 # CELL ********************
 
 def time_series_stats(df, group_cols, target_col):      
-    w = Window.partitionBy(group_cols).orderBy("Date").rowsBetween(-12,0)
+    w = Window.partitionBy(group_cols).orderBy("Date").rowsBetween(-11,0)
 
     df_stats = (
-        df.withColumn("rolling_mean", avg(target_col).over(w))\
-        .withColumn("prev_mean", lag("rolling_mean").over(Window.partitionBy(group_cols).orderBy("Date")))\
-        .withColumn("mean_change", abs(col("rolling_mean")-col("prev_mean")))\
+        df.withColumn("rolling_mean_12", avg(target_col).over(w))\
+        .withColumn("prev_mean", lag("rolling_mean_12").over(Window.partitionBy(group_cols).orderBy("Date")))\
+        .withColumn("mean_change", abs(col("rolling_mean_12")-col("prev_mean")))\
         .withColumn("obs_count", count("Quantity").over(w))
     )
 
@@ -650,25 +689,59 @@ def time_series_stats(df, group_cols, target_col):
     df_stable = df_w_thresholds.withColumn("is_stable", (col("mean_change") <= col("threshold")).cast("int"))
     df_stable = df_stable.withColumn("stable_run", sum("is_stable").over(Window.partitionBy(group_cols).orderBy("Date").rowsBetween(-12,0)))
 
-    return df_stable
-top_df = group_and_fill_data(filtered_actuals,TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
-df_stats = time_series_stats(top_df, TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
-df_stats = df_stats.withColumn("longest_stable_run", 
-                                max(col("stable_run")).over(Window.partitionBy(TOPLINE_GRP_COLS)))
-display(df_stats)
-df_with_cutoff = df_stats.withColumn("min_cutoff_date",
-                                    min(when(col("stable_run")==col("longest_stable_run"), col("Date")))\
-                                    .over(Window.partitionBy(TOPLINE_GRP_COLS)))\
-                        .withColumn("max_cutoff_date",
-                                    max(when(col("stable_run")==col("longest_stable_run"), col("Date")))\
-                                    .over(Window.partitionBy(TOPLINE_GRP_COLS)))
-display(df_with_cutoff.select("Product_Category","Date","stable_run","longest_stable_run","min_cutoff_date","max_cutoff_date"))
 
-display(df_with_cutoff.select("Product_Category","longest_stable_run","min_cutoff_date","max_cutoff_date").distinct())
+    df_stable = df_stable.withColumn("longest_stable_run", 
+                                    max(col("stable_run")).over(Window.partitionBy(*group_cols)))
 
 
-display(df_stats.groupBy(TOPLINE_GRP_COLS).agg(max(col("stable_run"))))
+    df_stable = df_stable.withColumn("min_cutoff_date",
+                                        min(
+                                            when(
+                                                col("stable_run")==col("longest_stable_run"), 
+                                                add_months(col("Date"), -col("longest_stable_run"))
+                                            )
+                                        ).over(Window.partitionBy(*group_cols)))\
+                            .withColumn("max_cutoff_date",
+                                        max(
+                                            when(
+                                                col("stable_run")==col("longest_stable_run"), 
+                                                add_months(col("Date"), -col("longest_stable_run"))
+                                            )
+                                        ).over(Window.partitionBy(*group_cols)))
 
+    df_stable = df_stable.select("series", 'Date', 'Quantity', 'rolling_mean_12', 'prev_mean', 'mean_change', 
+                                'obs_count', 'threshold', 'is_stable', 'stable_run', 'longest_stable_run', 
+                                'min_cutoff_date', 'max_cutoff_date')
+
+    stable_runs = df_stable
+    stable_runs = stable_runs.filter(col("stable_run")==col("longest_stable_run"))
+
+    stable_runs = stable_runs.withColumn("stable_run_start_date", add_months(col("Date"), -col("longest_stable_run")))
+
+    stable_runs = stable_runs.select("series","Date","longest_stable_run","stable_run_start_date")
+
+    stable_runs = stable_runs.orderBy(col("series"),col("stable_run_start_date").asc())
+
+    return df_stable, stable_runs
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_run_stats, topline_stable_runs = time_series_stats(topline_data, TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
+
+middle_run_stats, middle_stable_runs = time_series_stats(middle_data, MIDDLE_GRP_COLS, MIDDLE_TARGET_COL)
+
+all_run_stats = topline_run_stats.unionByName(middle_run_stats)
+all_stable_runs = topline_stable_runs.unionByName(middle_stable_runs)
+
+all_run_stats.write.format("delta").mode("overwrite").saveAsTable(STABLE_STATS_TABLE)
+all_stable_runs.write.format("delta").mode("overwrite").saveAsTable(STABLE_RUNS_TABLE)
 
 # METADATA ********************
 
@@ -692,49 +765,49 @@ display(df_stats.groupBy(TOPLINE_GRP_COLS).agg(max(col("stable_run"))))
 
 # CELL ********************
 
-def run_data_quality_check(df, grouping_cols, target_col, date_col="Date"):
+def run_data_quality_check(df, target_col, date_col="Date"):
    
     ## Missing values
     ## how many rows have NULL values in the target column
 
     missing_summary = (
-        df.groupBy(grouping_cols)\
-            .agg(sum(col(target_col).isNull().cast("int")).alias("missing_count"))
+        df.groupBy("series")\
+            .agg(sum(col(target_col).isNull().cast("int")).alias("null_count"))
     )
 
     ## Zero inflation
     ## how many rows have a 0 for the value in the target column
     zero_summary = (
-        df.groupBy(grouping_cols)
+        df.groupBy("series")
           .agg(sum((col(target_col) == 0).cast("int")).alias("zero_count"))
     )
     
     ## NaN detection
     ## how many rows contain NaN in the target column
     nan_summary = (
-        df.groupBy(grouping_cols)
+        df.groupBy("series")
           .agg(sum(isnan(col(target_col)).cast("int")).alias("nan_count"))
     )
 
 
     ## Gaps in time series
     ## how many missing dates exist in the time series for each group
-    w = Window.partitionBy(grouping_cols).orderBy(date_col)
+    w = Window.partitionBy("series").orderBy(date_col)
 
     df_with_lag = df.withColumn("previous_date", lag(date_col).over(w))
 
     gap_summary = (
-        df_with_lag.withColumn("gap_days", datediff(col(date_col), col("previous_date")))\
-                    .filter(col("gap_days")>1)
-                    .groupBy(grouping_cols)
+        df_with_lag.withColumn("gap_months", months_between(col(date_col), col("previous_date")))\
+                    .filter(col("gap_months")>1)
+                    .groupBy("series")
                     .agg(count("*").alias("gap_count"))
     )
 
     result = (
                 missing_summary
-                .join(zero_summary, grouping_cols, "left")
-                .join(nan_summary, grouping_cols, "left")
-                .join(gap_summary, grouping_cols, "left")
+                .join(zero_summary, "series", "left")
+                .join(nan_summary, "series", "left")
+                .join(gap_summary, "series", "left")
                 .fillna(0)
     )
 
@@ -749,22 +822,12 @@ def run_data_quality_check(df, grouping_cols, target_col, date_col="Date"):
 
 # CELL ********************
 
-dq_results = {}
+topline_data_quality = run_data_quality_check(topline_data,TOPLINE_TARGET_COL)
+middle_data_quality = run_data_quality_check(middle_data, MIDDLE_TARGET_COL)
 
-for model_name, cfg in model_data_mapping.items():
-    print(f"Running DQ checks for: {model_name}")
+all_data_quality = topline_data_quality.unionByName(middle_data_quality)
 
-    df = spark.table(cfg["table_name"])
-
-    dq_results[model_name] = run_data_quality_check(
-        df=df,
-        grouping_cols=cfg["grouping_cols"],
-        target_col=cfg["target_col"],
-        date_col="Date"
-    )
-
-display(dq_results['topline'].orderBy(desc("missing_count")).limit(35))
-display(dq_results['middle'].orderBy(desc("missing_count")))
+all_data_quality.write.format("delta").mode("overwrite").saveAsTable(BASE_DQ_TABLE)
 
 # METADATA ********************
 
@@ -773,8 +836,24 @@ display(dq_results['middle'].orderBy(desc("missing_count")))
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# ### Cutoff Date Assignment
+# 
+# set within the Config files
+
 # CELL ********************
 
+# HISTORICAL_CUTOFF_DATES = {
+#     "ALU": "01-03-2019",
+#     "AVP_CDU": "01-05-2016",
+#     "HEXPV": "01-01-2018",
+#     "MAERSK_COMPRESSOR": "01-02-2020",
+#     "MAERSK_ELECTRONICS": "01-10-2019",
+#     "PISTON": "01-10-2016",
+#     "SCREWS": "01-04-2020",
+#     "SCROLLS": "01-06-2015"
+# }
 
 # METADATA ********************
 
@@ -787,71 +866,110 @@ display(dq_results['middle'].orderBy(desc("missing_count")))
 
 # # Use data w/ cutoff date applied
 
+# CELL ********************
+
+## creating dataframe w/ the cutoff dates
+data = []
+for key, item in HISTORICAL_CUTOFF_DATES.items():
+    data.append({
+                "series":key,
+                "cutoff_date":item
+                })
+df = pd.DataFrame(data)
+cutoff_dates = spark.createDataFrame(df)
+cutoff_dates = cutoff_dates.withColumn("cutoff_date", to_date(col("cutoff_date"), "dd-MM-yyyy"))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+filtered_topline_data = (
+    topline_data.alias("d")
+    .join(
+        cutoff_dates.alias("c"),
+        col("d.series").startswith(col("c.series")),
+        "inner"
+    )
+    .filter(col("d.Date")>=col("c.cutoff_date"))
+    .select("d.*")
+)
+display(filtered_topline_data.limit(5))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+filtered_middle_data = (
+    middle_data.alias("d")
+    .join(
+        cutoff_dates.alias("c"),
+        col("d.series").startswith(col("c.series")),
+        "inner"
+    )
+    .filter(col("d.Date")>=col("c.cutoff_date"))
+    .select("d.*")
+)
+display(filtered_middle_data.limit(5))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+filtered_topline_data.write.format("delta").mode("overwrite").saveAsTable(TOPLINE_CUTOFF_DATA_TABLE)
+filtered_middle_data.write.format("delta").mode("overwrite").saveAsTable(MIDDLE_CUTOFF_DATA_TABLE)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
-# # 4. Exploratory Analysis
+# # 4. Exploratory Analysis - Cutoff filtered data
 # understand target behavior prior to feature selection
 
 
+# CELL ********************
+
+topline_cutoff_data = spark.read.table(TOPLINE_CUTOFF_DATA_TABLE)
+middle_cutoff_data = spark.read.table(MIDDLE_CUTOFF_DATA_TABLE)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
-# #### Distribution Analysis 
-# Histogram + KDE of target values log scaled
+# ### Data Quality Check
 
 # CELL ********************
 
-def histogram_viz(groups, group_cols df):
+cutoff_topline_dq = run_data_quality_check(topline_cutoff_data,TOPLINE_TARGET_COL)
+cutoff_middle_dq = run_data_quality_check(middle_cutoff_data, MIDDLE_TARGET_COL)
 
-    for row in groups:
+all_cutoff_dq = cutoff_topline_dq.unionByName(cutoff_middle_dq)
 
-        filters = [col(c) == row[c] for c in group_cols]
-        subdf = df.filter(reduce(lambda a, b: a & b, filters))
-
-        pdf = subdf.select(topline_target_col).toPandas()
-        
-        # compute log transform
-        pdf["log_target"] = np.log1p(pdf[topline_target_col].clip(lower=0) + 1e-6)
-        
-        # plot
-        sns.histplot(pdf["log_target"], kde=True)
-        plt.title(f"Log Distribution for {row.asDict()}")
-        plt.show()
-histogram_viz(topline_groups, TOPLINE_GRP_COLS, topline)
-histogram_viz(middle_groups, MIDDLE_GRP_COLS, middle)
-plt.figure(figsize=(10,6))
-
-sns.histplot(
-    pdf["log_target"],
-    kde=True,
-    bins=50,
-    color="steelblue"
-)
-
-plt.title("Histogram + KDE of Target Variable (Log Scale)")
-plt.xlabel("log(Quantity + 1)")
-plt.ylabel("Frequency")
-
-plt.show()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+all_cutoff_dq.write.format("delta").mode("overwrite").saveAsTable(CUTOFF_DQ_TABLE)
 
 # METADATA ********************
 
@@ -869,6 +987,82 @@ plt.show()
 
 # CELL ********************
 
+def STL_decomposition(df):
+    ## create list of all series that the STL analysis needs to be conducted on
+    series = df.select("series").distinct().collect()
+
+    ## impute null values with 0 for STL alg
+    df = df.fillna({"Quantity":0})
+
+    ## create list to capture all STL metrics 
+    metrics = []
+    for row in series:
+
+        ## create pandas dataframe for each unique time series
+        serie = row["series"]
+        series_df = df.filter(col("series")==serie).orderBy("Date")
+        series_pdf = series_df.select("Date", "Quantity").toPandas()
+
+        ## preping the time series for STL processing
+        series_pdf["Date"] = pd.to_datetime(series_pdf["Date"])
+
+        series_pdf = series_pdf.set_index("Date")
+
+        ts = series_pdf["Quantity"].asfreq("MS")
+
+        ## applying STL
+        stl = STL(
+            ts,
+            period=12,
+            robust=True
+        )
+
+        result = stl.fit()
+
+        ## visualizing results
+        fig = result.plot()
+
+        fig.set_size_inches(12,8)
+
+        fig.suptitle(f"{serie} - STL Decomposition", fontsize=16, fontweight="bold", y=1.02)
+
+
+        ## Writing the plot to the lakehouse 
+        file_name = f"{serie}_STL.png"
+        local_path = f"/tmp/{file_name}"
+        lakehouse_path = f"Files/Visualizations/STL/{file_name}"
+
+        fig.savefig(local_path, bbox_inches="tight")
+        plt.close(fig)
+
+        mssparkutils.fs.cp(
+            f"file:{local_path}",
+            lakehouse_path
+        )
+
+
+        trend = result.trend
+        seasonal = result.seasonal
+        resid = result.resid
+
+        eps = 1e-10
+
+        seasonal_denom = (seasonal + resid).var()
+        trend_denom = (trend + resid).var()
+
+        seasonal_strength = float(builtins.max(0, 1 - resid.var() / (seasonal_denom + eps)))
+        trend_strength = float(builtins.max(0, 1 - resid.var() / (trend_denom + eps)))
+
+        noise_ratio = float(resid.var() / (seasonal.var() + trend.var() + resid.var() + eps))
+
+        metrics.append({
+                        "series":serie,
+                        "seasonal_strength": seasonal_strength,
+                        "trend_strength": trend_strength,
+                        "noise_ratio": noise_ratio
+                        })
+
+    return spark.createDataFrame(metrics)
 
 # METADATA ********************
 
@@ -879,6 +1073,42 @@ plt.show()
 
 # CELL ********************
 
+topline_STL_metrics = STL_decomposition(topline_cutoff_data)
+middle_STL_metrics = STL_decomposition(middle_cutoff_data)
+
+
+all_STL_metrics = topline_STL_metrics.unionByName(middle_STL_metrics).select("series","seasonal_strength","trend_strength", "noise_ratio")
+
+
+# seasonal and trend strength metric
+# | Strength | Interpretation       |
+# | -------- | -------------------- |
+# | >0.8     | Strong    |
+# | 0.4–0.8  | Moderate  |
+# | <0.4     | Weak      |
+
+## residual variance metric
+# | Value   | Interpretation    |
+# | >0.5    | High Noise        |
+# | >=0.2   | Moderate Noise    |
+# | <0.2    | Low Noise         |
+all_STL_metrics = all_STL_metrics.withColumn("seasonal_strength_flag", 
+                                            when(col("seasonal_strength")>0.8,"Strong")
+                                            .when(col("seasonal_strength")>=0.4, "Moderate")
+                                            .otherwise("Weak")
+                                            )\
+                                .withColumn("trend_strength_flag",
+                                            when(col("trend_strength")>=0.8, "Strong")
+                                            .when(col("trend_strength")>=0.4,"Moderate")
+                                            .otherwise("Weak")
+                                            )\
+                                .withColumn("noise_level_flag",
+                                            when(col("noise_ratio")>0.5, "High Noise")
+                                            .when(col("noise_ratio")>=0.2, "Moderate Noise")
+                                            .otherwise("Low Noise"))
+
+                                            
+all_STL_metrics.write.format("delta").mode("overwrite").saveAsTable(STL_METRICS_TABLE)
 
 # METADATA ********************
 
@@ -892,54 +1122,236 @@ plt.show()
 # # 6. Stationarity
 # ADF, KPSS, Phillips Perron
 
+# MARKDOWN ********************
+
+# #### ADF test
+
 # CELL ********************
 
-def adf_test(groups, group_cols, df):
+def adf_test(df):
+
     results = []
 
-    for row in groups:
+    series = df.select("series").distinct().collect()
 
-        record = row[0]
+    for row in series:
 
-        series = (
+        serie = row["series"]
+
+        serie_df = (
             df
-            .filter(col(group_cols[0]) == record)
-            .select(group_cols)
-            .toPandas()[group_cols]
+            .filter(col("series") == serie)
+            .orderBy("Date")
+            .toPandas()
+        )
+
+        # ensure clean numeric series
+        ts = (
+            serie_df["Quantity"]
+            .astype(float)
             .dropna()
+            .values
         )
 
-        adf_stat, p_value, *_ = adfuller(series)
+        # -----------------------------------------
+        # NEW: minimum sample size guard
+        # -----------------------------------------
+        if len(ts) < 12:
+            results.append({
+                "series": serie,
+                "adf_stat": None,
+                "p_value": None,
+                "stationary_flag": "Insufficient Data (<12 obs)"
+            })
+            continue
 
-        results.append((
-            record,
-            adf_stat,
-            p_value,
-            "Stationary" if p_value < 0.05 else "Non-Stationary"
-        ))
+        # -----------------------------------------
+        # NEW: safe ADF execution
+        # -----------------------------------------
+        try:
+            adf_stat, p_value, *_ = adfuller(ts)
 
-    results_clean = [
-        (
-            str(r[0]),
-            float(r[1]),
-            float(r[2]),
-            str(r[3])
-        )
-        for r in results
-    ]
+            results.append({
+                "series": serie,
+                "adf_stat": float(adf_stat),
+                "p_value": float(p_value),
+                "stationary_flag": (
+                    "Strongly Stationary" if p_value < 0.01
+                    else "Stationary" if p_value < 0.05
+                    else "Weakly Non-Stationary" if p_value < 0.10
+                    else "Non-Stationary"
+                )
+            })
 
+        except Exception as e:
+            results.append({
+                "series": serie,
+                "adf_stat": None,
+                "p_value": None,
+                "stationary_flag": f"ADF Failed: {str(e)}"
+            })
+
+    # -----------------------------------------
+    # SAFE conversion to Spark
+    # -----------------------------------------
     adf_schema = StructType([
-        StructField("Product_Category", StringType(), False),
-        StructField("ADF_Statistic", DoubleType(), False),
-        StructField("P_Value", DoubleType(), False),
-        StructField("Stationarity", StringType(), False)
+        StructField("Series", StringType(), False),
+        StructField("ADF_Statistic", DoubleType(), True),
+        StructField("P_Value", DoubleType(), True),
+        StructField("Stationarity_Flag", StringType(), False)
     ])
 
     adf_results = spark.createDataFrame(
-        results_clean, schema=adf_schema)
+        [
+            (
+                r["series"],
+                r["adf_stat"],
+                r["p_value"],
+                r["stationary_flag"]
+            )
+            for r in results
+        ],
+        schema=adf_schema
+    )
 
     return adf_results
 
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_adf_results = adf_test(middle_cutoff_data)
+topline_adf_results = adf_test(topline_cutoff_data)
+   
+
+all_adf_results = topline_adf_results.unionByName(middle_adf_results)
+
+all_adf_results.write.format("delta").mode("overwrite").saveAsTable(ADF_STATS_TABLE)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### KPSS Test
+
+
+# CELL ********************
+
+def kpss_test(df):
+
+    results = []
+
+    series = df.select("series").distinct().collect()
+
+    for row in series:
+
+        serie = row["series"]
+
+        serie_df = (
+            df
+            .filter(col("series") == serie)
+            .orderBy("Date")
+            .toPandas()
+        )
+
+        ts = (
+            serie_df["Quantity"]
+            .astype(float)
+            .dropna()
+            .values
+        )
+
+        n_obs = len(ts)
+
+        # --------------------------------------------------
+        # Minimum sample size guardrail
+        # --------------------------------------------------
+        if n_obs < 12:
+
+            results.append({
+                "series": serie,
+                "n_obs": n_obs,
+                "kpss_stat": None,
+                "p_value": None,
+                "stationarity_flag": "Insufficient Data (<12 obs)"
+            })
+
+            continue
+
+        # --------------------------------------------------
+        # Run KPSS
+        # --------------------------------------------------
+        try:
+
+            kpss_stat, p_value, _, _ = kpss(
+                ts,
+                regression="c",      # level stationarity
+                nlags="auto"
+            )
+
+            results.append({
+                "series": serie,
+                "n_obs": n_obs,
+                "kpss_stat": float(kpss_stat),
+                "p_value": float(p_value),
+
+                # NOTE:
+                # KPSS NULL = Stationary
+
+                "stationarity_flag":
+                    "Strongly Stationary" if p_value >= 0.10
+                    else "Stationary" if p_value >= 0.05
+                    else "Weakly Non-Stationary" if p_value >= 0.01
+                    else "Non-Stationary"
+            })
+
+        except Exception as e:
+
+            results.append({
+                "series": serie,
+                "n_obs": n_obs,
+                "kpss_stat": None,
+                "p_value": None,
+                "stationarity_flag": f"KPSS Failed: {str(e)}"
+            })
+
+    # --------------------------------------------------
+    # Create Spark DataFrame
+    # --------------------------------------------------
+
+    kpss_schema = StructType([
+        StructField("Series", StringType(), False),
+        StructField("N_Obs", IntegerType(), False),
+        StructField("KPSS_Statistic", DoubleType(), True),
+        StructField("P_Value", DoubleType(), True),
+        StructField("Stationarity_Flag", StringType(), False)
+    ])
+
+    kpss_results = spark.createDataFrame(
+        [
+            (
+                r["series"],
+                r["n_obs"],
+                r["kpss_stat"],
+                r["p_value"],
+                r["stationarity_flag"]
+            )
+            for r in results
+        ],
+        schema=kpss_schema
+    )
+
+    return kpss_results
 
 # METADATA ********************
 
@@ -950,11 +1362,114 @@ def adf_test(groups, group_cols, df):
 
 # CELL ********************
 
-middle_adf_results = adf_test(middle_groups, MIDDLE_GRP_COLS, middle)
-topline_adf_results = adf_test(topline_groups, MIDDLE_GRP_COLS, topline)
+topline_kpss = kpss_test(topline_cutoff_data)
+middle_kpss = kpss_test(middle_cutoff_data)
 
-display(middle_adf_results)
-display(topline_adf_results)    
+all_kpss_stats =  topline_kpss.unionByName(middle_kpss)
+
+all_kpss_stats.write.format("delta").mode("overwrite").saveAsTable(KPSS_STATS_TABLE)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### Phillips Perron test
+
+# CELL ********************
+
+def pp_test(df):
+
+    results = []
+
+    series = df.select("series").distinct().collect()
+
+    for row in series:
+
+        serie = row["series"]
+
+        serie_df = (
+            df
+            .filter(col("series") == serie)
+            .orderBy("Date")
+            .toPandas()
+        )
+
+        ts = (
+            serie_df["Quantity"]
+            .astype(float)
+            .dropna()
+            .values
+        )
+
+        n_obs = len(ts)
+
+        if n_obs < 12:
+
+            results.append({
+                "series": serie,
+                "n_obs": n_obs,
+                "pp_stat": None,
+                "p_value": None,
+                "stationarity_flag": "Insufficient Data (<12 obs)"
+            })
+
+            continue
+
+        try:
+
+            pp = PhillipsPerron(ts)
+
+            pp_stat = float(pp.stat)
+            p_value = float(pp.pvalue)
+
+            results.append({
+                "series": serie,
+                "n_obs": n_obs,
+                "pp_stat": pp_stat,
+                "p_value": p_value,
+                "stationarity_flag":
+                    "Strongly Stationary" if p_value < 0.01
+                    else "Stationary" if p_value < 0.05
+                    else "Weakly Non-Stationary" if p_value < 0.10
+                    else "Non-Stationary"
+            })
+
+        except Exception as e:
+
+            results.append({
+                "series": serie,
+                "n_obs": n_obs,
+                "pp_stat": None,
+                "p_value": None,
+                "stationarity_flag": f"PP Failed: {str(e)}"
+            })
+
+    schema = StructType([
+        StructField("Series", StringType(), False),
+        StructField("N_Obs", IntegerType(), False),
+        StructField("PP_Statistic", DoubleType(), True),
+        StructField("P_Value", DoubleType(), True),
+        StructField("Stationarity_Flag", StringType(), False)
+    ])
+
+    return spark.createDataFrame(
+        [
+            (
+                r["series"],
+                r["n_obs"],
+                r["pp_stat"],
+                r["p_value"],
+                r["stationarity_flag"]
+            )
+            for r in results
+        ],
+        schema=schema
+    )
 
 # METADATA ********************
 
@@ -965,8 +1480,252 @@ display(topline_adf_results)
 
 # CELL ********************
 
-middle_adf_results.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting/Data_Exploration/Middle_ADF")
-topline_adf_results.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting/Data_Exploration/Topline_ADF")
+topline_pp_results = pp_test(topline_cutoff_data)
+middle_pp_results = pp_test(middle_cutoff_data)
+
+all_pp_results = topline_pp_results.unionByName(middle_pp_results)
+
+all_pp_results.write.format("delta").mode("overwrite").saveAsTable(PP_STATS_TABLE)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### Merging all Stationary test for final assignment
+
+# CELL ********************
+
+adf_stats = spark.read.table(ADF_STATS_TABLE)
+kpss_stats = spark.read.table(KPSS_STATS_TABLE)
+pp_stats = spark.read.table(PP_STATS_TABLE)
+
+adf_stats_clean = adf_stats.withColumnsRenamed({"P_Value":"ADF_P_Value", "Stationarity_Flag":"ADF_Stationarity_Flag"})
+kpss_stats_clean = kpss_stats.withColumnsRenamed({"P_Value":"KPSS_P_Value","Stationarity_Flag":"KPSS_Stationarity_Flag"}).drop("N_Obs")
+pp_stats_clean = pp_stats.withColumnsRenamed({"P_Value":"PP_P_Value", "Stationarity_Flag":"PP_Stationarity_Flag"})
+
+all_stats = adf_stats_clean\
+                .join(kpss_stats_clean, "Series")\
+                .join(pp_stats_clean, "Series")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+df = all_stats  # replace with your stationarity results dataframe
+
+# -----------------------------
+# Step 1: Binary stationarity signals
+# -----------------------------
+df = (
+    df
+    .withColumn("ADF_is_stationary", when(col("ADF_P_Value") < 0.05, 1).otherwise(0))
+    .withColumn("PP_is_stationary", when(col("PP_P_Value") < 0.05, 1).otherwise(0))
+    .withColumn("KPSS_is_stationary", when(col("KPSS_P_Value") > 0.05, 1).otherwise(0))
+)
+
+# -----------------------------
+# Step 2: Composite score
+# -----------------------------
+df = df.withColumn(
+    "stationarity_score",
+    col("ADF_is_stationary") +
+    col("PP_is_stationary") +
+    col("KPSS_is_stationary")
+)
+
+# -----------------------------
+# Step 3: Final stationarity flag (base logic + conflict handling)
+# -----------------------------
+df = df.withColumn(
+            "Final_Stationarity_Flag",
+            when(
+                (col("ADF_is_stationary") == 1) &
+                (col("PP_is_stationary") == 1) &
+                (col("KPSS_is_stationary") == 0),
+                "Trend / Structural Break Stationary"
+            )
+            .when(col("stationarity_score") == 3, "Strongly Stationary")
+            .when(col("stationarity_score") == 2, "Stationary (Mixed Evidence)")
+            .when(col("stationarity_score") == 1, "Weakly Stationary / Unstable")
+            .otherwise("Non-Stationary")
+        )\
+        .drop("ADF_is_stationary","PP_is_stationary", "KPSS_is_stationary","stationarity_score")
+
+
+df.write.format("delta").mode("overwrite").saveAsTable(STATIONARY_STATS_TABLE)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### Stationarity Visual Check
+# - original series (Date vs Quantity)
+#     
+#     look for mean or variance drift, as well as sructural breaks 
+# - Date vs YoY Growth 
+#     
+#     look for stable oscillation around zero (stable), or persistent trends (non stationary)
+# - First difference (Yt - Yt-1)
+# 
+#     look for random fluctuation around zero (stable), or persistent trends (non stationary)
+# - Rolling Stats visualization (original, rolling mean, rolling std)
+#     
+#     look for flat rolling mean/variance (stable), non flat (non stationary)
+
+# CELL ********************
+
+def stationary_visualization(df):
+    series = df.select("series").distinct().collect()
+
+    for row in series:
+
+        ## create pandas dataframe for each unique time series
+        serie = row["series"]
+        series_df = all_stationarity.filter(col("series")==serie).orderBy("Date")
+        series_pdf = series_df.select("Date", "Quantity","YoY_Growth","first_diff","rolling_mean","rolling_std").toPandas()
+
+        ## Date on x axis
+        series_pdf["Date"] = pd.to_datetime(series_pdf["Date"])
+        series_pdf = series_pdf.set_index("Date")
+
+
+        # -----------------------------
+        # Plot 1: Quantity + Stationarity Metrics
+        # -----------------------------
+
+        fig1, ax1 = plt.subplots(figsize=(12, 8))
+
+        series_pdf[
+            [
+                "Quantity",
+                "first_diff",
+                "rolling_mean",
+                "rolling_std"
+            ]
+        ].plot(ax=ax1)
+
+        ax1.set_title(f"{serie} - Quantity, First Difference, Rolling Mean & Rolling Std")
+        ax1.set_xlabel("Date")
+
+        # More y-axis ticks
+        ax1.yaxis.set_major_locator(MaxNLocator(nbins=15))
+
+        # Minor ticks between major ticks
+        ax1.yaxis.set_minor_locator(AutoMinorLocator())
+
+        # Grid lines
+        ax1.grid(True, which="major", linestyle="--", alpha=0.7)
+        ax1.grid(True, which="minor", linestyle=":", alpha=0.4)
+        ax1.axhline(y=0, linestyle="--", alpha=0.5)
+
+        plt.tight_layout()
+
+
+
+        ## Writing the plot to the lakehouse 
+        file_name = f"{serie}_Stationarity_Metrics.png"
+        local_path = f"/tmp/{file_name}"
+        lakehouse_path = f"Files/Visualizations/Stationarity_Metrics/{file_name}"
+
+        fig1.savefig(local_path, bbox_inches="tight")
+        plt.close(fig1)
+
+        mssparkutils.fs.cp(
+            f"file:{local_path}",
+            lakehouse_path
+        )
+
+        # -----------------------------
+        # Plot 2: YoY Growth
+        # -----------------------------
+
+
+        fig2, ax2 = plt.subplots(figsize=(12, 8))
+
+        series_pdf[["YoY_Growth"]].plot(ax=ax2)
+
+        ax2.set_title(f"{serie} - YoY Growth")
+        ax2.set_xlabel("Date")
+
+        # More y-axis ticks
+        ax2.yaxis.set_major_locator(MaxNLocator(nbins=12))
+
+        # Show as percentages
+        ax2.yaxis.set_major_formatter(PercentFormatter(1.0))
+
+        # Grid lines
+        ax2.grid(True, which="major", linestyle="--", alpha=0.7)
+        ax2.grid(True, which="minor", linestyle=":", alpha=0.4)
+        ax2.axhline(y=0, linestyle="--", alpha=0.5)
+
+        plt.tight_layout()
+
+
+
+        ## Writing the plot to the lakehouse 
+        file_name = f"{serie}_YoY_Growth.png"
+        local_path = f"/tmp/{file_name}"
+        lakehouse_path = f"Files/Visualizations/Stationarity_Metrics/{file_name}"
+
+        fig2.savefig(local_path, bbox_inches="tight")
+        plt.close(fig2)
+
+        mssparkutils.fs.cp(
+            f"file:{local_path}",
+            lakehouse_path
+        )
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+all_cutoff_data = topline_cutoff_data.select("series","Date","Quantity").unionByName(middle_cutoff_data.select("series","Date","Quantity"))
+w = Window.partitionBy("series").orderBy("Date")
+
+w_12 = (Window.partitionBy("series").orderBy("Date").rowsBetween(-11,0))
+
+
+all_stationarity = all_cutoff_data\
+                            .withColumn("lag_12", lag(col("Quantity"),12).over(w))\
+                            .withColumn(
+                                            "YoY_Growth", 
+                                            ((col("Quantity")-col("lag_12"))/col("lag_12"))
+                                        )\
+                            .withColumn("first_diff", col("Quantity")-lag(col("Quantity"),1).over(w))\
+                            .withColumn("rolling_mean", avg(col("Quantity")).over(w_12))\
+                            .withColumn("rolling_std", stddev(col("Quantity")).over(w_12))
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+stationary_visualization(all_stationarity)
 
 # METADATA ********************
 
