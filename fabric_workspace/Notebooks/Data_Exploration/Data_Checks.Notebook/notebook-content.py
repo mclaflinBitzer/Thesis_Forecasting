@@ -329,6 +329,7 @@ from matplotlib.ticker import PercentFormatter
 # - KPSS_STATS_TABLE 
 # - PP_STATS_TABLE 
 # - STATIONARY_STATS_TABLE
+# - HIST_CUTOFF_DATE_TABLE 
 
 # CELL ********************
 
@@ -854,6 +855,72 @@ all_data_quality.write.format("delta").mode("overwrite").saveAsTable(BASE_DQ_TAB
 #     "SCREWS": "01-04-2020",
 #     "SCROLLS": "01-06-2015"
 # }
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+historical_cutoff_dates = [
+    ["ALU", "01-03-2019"],
+    ["AVP_CDU", "01-05-2016"],
+    ["HEXPV", "01-01-2018"],
+    ["MAERSK_COMPRESSOR", "01-02-2020"],
+    ["MAERSK_ELECTRONICS", "01-10-2019"],
+    ["PISTON", "01-10-2016"],
+    ["SCREWS", "01-04-2020"],
+    ["SCROLLS", "01-06-2015"]
+]
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+import pandas as pd
+
+df_cutoffs = pd.DataFrame(
+    historical_cutoff_dates,
+    columns=["series", "historical_cutoff_date"]
+)
+
+df_cutoffs["historical_cutoff_date"] = pd.to_datetime(
+                                df_cutoffs["historical_cutoff_date"],
+                                format="%d-%m-%Y"
+                            )
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+HIST_CUTOFF_DATE_TABLE = "Sales_Forecasting.silver.historical_cutoff_dates"
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+spark_df_cutoff_dates = spark.createDataFrame(df_cutoffs)
+
+spark_df_cutoff_dates.write.format("delta").mode("overwrite").saveAsTable(HIST_CUTOFF_DATE_TABLE)
 
 # METADATA ********************
 

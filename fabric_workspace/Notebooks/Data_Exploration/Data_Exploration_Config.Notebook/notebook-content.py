@@ -51,6 +51,7 @@ ADF_STATS_TABLE = "Sales_Forecasting.Data_Exploration.ADF_stats"
 KPSS_STATS_TABLE = "Sales_Forecasting.Data_Exploration.kpss_stats"
 PP_STATS_TABLE = "Sales_Forecasting.Data_Exploration.pp_stats"
 STATIONARY_STATS_TABLE = "Sales_Forecasting.Data_Exploration.stationary_stats"
+HIST_CUTOFF_DATE_TABLE = "Sales_Forecasting.silver.historical_cutoff_dates"
 
 HISTORICAL_CUTOFF_DATES = {
     "ALU": "01-03-2019",
