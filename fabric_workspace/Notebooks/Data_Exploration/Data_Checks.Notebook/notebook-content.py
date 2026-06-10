@@ -1233,7 +1233,7 @@ def adf_test(df):
             continue
 
         # -----------------------------------------
-        # NEW: safe ADF execution
+        # Safe ADF execution
         # -----------------------------------------
         try:
             adf_stat, p_value, *_ = adfuller(ts)
@@ -1259,7 +1259,7 @@ def adf_test(df):
             })
 
     # -----------------------------------------
-    # SAFE conversion to Spark
+    # Conversion to Spark
     # -----------------------------------------
     adf_schema = StructType([
         StructField("Series", StringType(), False),
@@ -1371,8 +1371,6 @@ def kpss_test(df):
                 "n_obs": n_obs,
                 "kpss_stat": float(kpss_stat),
                 "p_value": float(p_value),
-
-                # NOTE:
                 # KPSS NULL = Stationary
 
                 "stationarity_flag":
