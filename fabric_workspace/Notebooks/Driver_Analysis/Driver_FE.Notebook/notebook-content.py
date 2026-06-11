@@ -151,6 +151,7 @@ import statsmodels.api as sm
 from statsmodels.tsa.stattools import kpss
 from matplotlib.ticker import MaxNLocator, AutoMinorLocator
 from matplotlib.ticker import PercentFormatter
+from pyspark.sql.functions import pandas_udf
 
 # METADATA ********************
 
@@ -161,33 +162,7 @@ from matplotlib.ticker import PercentFormatter
 
 # CELL ********************
 
-# Welcome to your new notebook
-# Type here in the cell editor to add code!
 compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers")
-
-display(compiled_drivers.limit(100))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-from pyspark.sql.functions import *
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(compiled_drivers.filter(~col("Indicator").like("%Real USD%")).select("Indicator", "Value").distinct())
 
 # METADATA ********************
 
@@ -240,79 +215,64 @@ display(compiled_drivers.filter(~col("Indicator").like("%Real USD%")).select("In
 
 # CELL ********************
 
-def adf_test(df):
-    results = []
+def adf_group(df):
+    pdf = df.sort_values("Date")
 
-    series = df.select("Country","Indicator").distinct().collect()
+    country = pdf["Country"].iloc[0]
+    indicator = pdf["Indicator"].iloc[0]
 
-    for row in series:
+    ts = (
+        pd.to_numeric(pdf["Value"], errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .values
+    )
 
-        country = row["Country"]
-        indicator = row["Indicator"]
+
+    if len(ts) < 12:
+        return pd.DataFrame([{
+            "Country": pdf["Country"].iloc[0],
+            "Indicator": pdf["Indicator"].iloc[0],
+            "adf_stat": None,
+            "adf_p_value": None,
+            "adf_stationary_flag": "Insufficient Data"            
+        }])
+    
+    if np.nanstd(ts) == 0:
+        return pd.DataFrame([{
+            "Country": country,
+            "Indicator": indicator,
+            "adf_stat": None,
+            "adf_p_value": None,
+            "adf_stationary_flag": "Constant Series (Skipped)"
+        }])
 
 
-        serie_df = (
-            df
-            .filter((col("Country")==country) & (col("Indicator")==indicator))
-            .orderBy("Date")
-            .toPandas()  
-        )
+    ## ADF execution
+    try:
+        adf_stat, p_value, *_ = adfuller(ts)
 
-        ts = (
-            serie_df["Value"]
-            .astype(float)
-            .dropna()
-            .values
-        )
+        return pd.DataFrame([{
+            "Country": country,
+            "Indicator": indicator,
+            "adf_stat": adf_stat,
+            "adf_p_value": p_value,
+            "adf_stationary_flag": (
+                "Strongly Stationary" if p_value < 0.01
+                else "Stationary" if p_value < 0.05
+                else "Weakly Non Stationary" if p_value < 0.1
+                else "Non Stationary"
+            )
+        }])
 
-        # minimum sample size guard
-        if len(ts) < 12:
-            results.append({
-                "Country": country,
-                "Indicator": indicator,
-                "adf_stat": None,
-                "adf_p_value": None,
-                "adf_stationary_flag": "Insufficient Data (<12 obs)"
-            })
-
-            continue
-        
-        ## ADF execution
-        try:
-            adf_stat, p_value, *_ = adfuller(ts)
-
-            results.append({
-                "Country": country,
-                "Indicator": indicator,
-                "adf_stat": adf_stat,
-                "adf_p_value": p_value,
-                "adf_stationary_flag": (
-                    "Strongly Stationary" if p_value < 0.01
-                    else "Stationary" if p_value < 0.05
-                    else "Weakly Non Stationary" if p_value < 0.1
-                    else "Non Stationary"
-                )
-            })
-
-        except Exception as e:
-            results.append({
-                "Country": country,
-                "Indicator": indicator,
-                "adf_stat": None,
-                "adf_p_value": None,
-                "adf_stationary_flag": f"ADF Failed: {str(e)}"
-            })
-
-    ## Convert to Spark DF
-    adf_schema = StructType([
-        StructField("Country", StringType(), False),
-        StructField("Indicator", StringType(), False),
-        StructField("adf_stat", DoubleType(), True),
-        StructField("adf_p_value", DoubleType(), True),
-        StructField("adf_stationary_flag", StringType(), False)
-    ])
-    adf_results = spark.createDataFrame( results, schema=adf_schema)
-
+    except Exception as e:
+        return pd.DataFrame([{
+            "Country": country,
+            "Indicator": indicator,
+            "adf_stat": None,
+            "adf_p_value": None,
+            "adf_stationary_flag": f"ADF Failed: {str(e)}"
+        }])
 
 # METADATA ********************
 
@@ -323,20 +283,18 @@ def adf_test(df):
 
 # CELL ********************
 
-drivers_adf = adf_test(compiled_drivers)
+adf_schema = StructType([
+    StructField("Country", StringType(), True),
+    StructField("Indicator", StringType(), True),
+    StructField("adf_stat", DoubleType(), True),
+    StructField("adf_p_value", DoubleType(), True),
+    StructField("adf_stationary_flag", StringType(), True)
+])
 
-display(drivers_adf)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(compiled_drivers.filter(col("Country")=="World").orderBy("Indicator","Date"))
+adf_results = (compiled_drivers
+                    .groupBy("Country","Indicator")
+                    .applyInPandas(adf_group, schema=adf_schema)
+)
 
 # METADATA ********************
 
@@ -351,51 +309,50 @@ display(compiled_drivers.filter(col("Country")=="World").orderBy("Indicator","Da
 
 # CELL ********************
 
-def kpss_test(df):
-    results = []
+def kpss_group(df):
+    pdf = df.sort_values("Date")
 
-    series = df.select("Country","Indicator").distinct().collect()
+    country = pdf["Country"].iloc[0]
+    indicator = pdf["Indicator"].iloc[0]
 
-    for row in series:
+    # FORCE CLEAN NUMERIC PIPELINE
+    ts = (
+        pd.to_numeric(pdf["Value"], errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .values
+    )
 
-        country = row["Country"]
-        indicator = row["Indicator"]
 
-        serie_df = (
-            df
-            .filter((col("Country")==country) & (col("Indicator")==indicator))
-            .orderBy("Date")
-            .toPandas()
-        )
+    if len(ts) < 12:
+        return pd.DataFrame([{
+            "Country": country,
+            "Indicator": indicator,
+            "kpss_stat": None,
+            "kpss_p_value": None,
+            "kpss_stationary_flag": "Insufficient Data (<12 obs)"
+        }])
+    
+    # SAFETY CHECK 2: constant series
+    if np.nanstd(ts) == 0:
+        return pd.DataFrame([{
+            "Country": country,
+            "Indicator": indicator,
+            "kpss_stat": None,
+            "kpss_p_value": None,
+            "kpss_stationary_flag": "Constant Series (Skipped)"
+        }])
 
-        ts = (
-            series_df["Value"]
-            .astype(float)
-            .dropna()
-            .values
-        )
-
-        ## minimum sample size guardrail
-        if len(ts) < 12:
-            results.append({
-                "Country": country,
-                "Indicator": indicator,
-                "kpss_stat": None,
-                "kpss_p_value": None,
-                "kpss_stationary_flag": "Insufficient Data (<12 obs)"
-            })
-
-            continue
         
-        ## Run KPSS
-        try:
-            kpss_stat, p_value, _, _ = kpss(
-                ts,
-                regression="c",
-                nlags="auto"
-            )
+    ## Run KPSS
+    try:
+        kpss_stat, p_value, _, _ = kpss(
+            ts,
+            regression="c",
+            nlags="auto"
+        )
 
-            results.append({
+        return pd.DataFrame([{
                 "Country": country,
                 "Indicator": indicator,
                 "kpss_stat": kpss_stat,
@@ -405,29 +362,17 @@ def kpss_test(df):
                     else "Stationary" if p_value >= 0.05
                     else "Weakly Non-Stationary" if p_value >= 0.01
                     else "Non-Stationary"
-            })
-        
-        except Exception as e:
-            results.append([
+        }])
+
+
+    except Exception as e:
+        return pd.DataFrame([{
                 "Country": country,
                 "Indicator": indicator,
                 "kpss_stat": None,
                 "kpss_p_value": None,
-                "kpss_stationary_flag": f"KPSS Failed: {str(e)}"               
-            ])
-
-    ## Create Spark Dataframe
-    kpss_schema = StructType([
-        StructField("Country", StringType(), False),
-        StructField("Indicator", StringType(), False),
-        StructField("kpss_stat", DoubleType(), True),
-        StructField("kpss_p_value", DoubleType(), True),
-        StructField("kpss_stationary_flag", StringType(), False)
-    ])
-
-    kpss_df = spark.createDataFrame(results, schema=kpss_schema)
-
-    return kpss_df
+                "kpss_stationary_flag": f"KPSS Failed: {str(e)}"
+        }])
 
 # METADATA ********************
 
@@ -438,7 +383,16 @@ def kpss_test(df):
 
 # CELL ********************
 
-driver_kpss = kpss_test(compiled_drivers)
+kpss_schema = StructType([
+                    StructField("Country", StringType(), False),
+                    StructField("Indicator", StringType(), False),
+                    StructField("kpss_stat", DoubleType(), True),
+                    StructField("kpss_p_value", DoubleType(), True),
+                    StructField("kpss_stationary_flag", StringType(), False)
+])
+
+kpss_results = (compiled_drivers.groupBy("Country", "Indicator")
+                    .applyInPandas(kpss_group, schema=kpss_schema))
 
 # METADATA ********************
 
@@ -447,44 +401,77 @@ driver_kpss = kpss_test(compiled_drivers)
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# #### compilation of adf & kpss outputs
+
 # CELL ********************
 
-driver_stationary_stats = drivers_adf.join(driver_kpss, ["Country", "Indicator"])
+df_stationary_stats = adf_results.join(kpss_results, ["Country", "Indicator"])
 
-driver_final_stats = (
-    df_stationary_stats
-    .withColumn("ADF_is_stationary", when(col("adf_p_value") < 0.05, 1).otherwise(0))
-    .withColumn("KPSS_is_stationary", when(col("kpss_p_value") > 0.05, 1).otherwise(0))
+
+driver_final_stats = df_stationary_stats.withColumn(
+    "ADF_status",
+    when(col("adf_stationary_flag").contains("Constant"), "Constant")
+    .when(col("adf_stationary_flag").contains("Failed"), "Failed")
+    .otherwise("Valid")
+)
+
+driver_final_stats = driver_final_stats.withColumn(
+    "KPSS_status",
+    when(col("kpss_stationary_flag").contains("Constant"), "Constant")
+    .when(col("kpss_stationary_flag").contains("Failed"), "Failed")
+    .otherwise("Valid")
 )
 
 
-# -----------------------------
-# Composite score
-# -----------------------------
+driver_final_stats = driver_final_stats.withColumn(
+    "ADF_is_stationary",
+    when(col("ADF_status") != "Valid", None)
+    .when(col("adf_p_value") < 0.05, 1)
+    .otherwise(0)
+)
+
+driver_final_stats = driver_final_stats.withColumn(
+    "KPSS_is_stationary",
+    when(col("KPSS_status") != "Valid", None)
+    .when(col("kpss_p_value") > 0.05, 1)
+    .otherwise(0)
+)
+
 driver_final_stats = driver_final_stats.withColumn(
     "stationarity_score",
-    col("ADF_is_stationary") +
-    col("KPSS_is_stationary")
+    coalesce(col("ADF_is_stationary"), lit(0)) +
+    coalesce(col("KPSS_is_stationary"), lit(0))
 )
 
-# -----------------------------
-# Final stationarity flag (base logic + conflict handling)
-# -----------------------------
+
 driver_final_stats = driver_final_stats.withColumn(
-            "Final_Stationarity_Flag",
-            when(
-                (col("ADF_is_stationary") == 1) &
-                (col("KPSS_is_stationary") == 0),
-                "Trend / Structural Break Stationary"
-            )
-            .when(col("stationarity_score") == 2, "Strongly Stationary")
-            .when(col("stationarity_score") == 1, "Weakly Stationary / Unstable")
-            .otherwise("Non-Stationary")
-        )\
-        .drop("ADF_is_stationary", "KPSS_is_stationary")
+        "Final_Stationarity_Flag",
+        when(
+            (col("ADF_status") == "Constant") | (col("KPSS_status") == "Constant"),
+            "Constant Series"
+        )
+        .when(
+            (col("ADF_status") == "Failed") | (col("KPSS_status") == "Failed"),
+            "Test Failed / Unreliable"
+        )
+        .when(col("stationarity_score") == 2, "Strongly Stationary")
+        .when(col("stationarity_score") == 1, "Weakly Stationary / Unstable")
+        .otherwise("Non-Stationary")
+    )\
+    .drop("ADF_status","KPSS_status","ADF_is_stationary","KPSS_is_stationary","stationarity_score")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
 
 driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.driver_stationary_stats")
-
 
 # METADATA ********************
 
