@@ -1586,7 +1586,7 @@ all_stats = adf_stats_clean\
 
 # CELL ********************
 
-df = all_stats  # replace with your stationarity results dataframe
+df = all_stats  
 
 # -----------------------------
 # Step 1: Binary stationarity signals
