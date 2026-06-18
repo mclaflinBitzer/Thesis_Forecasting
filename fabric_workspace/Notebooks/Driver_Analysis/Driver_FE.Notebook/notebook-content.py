@@ -150,6 +150,7 @@ from statsmodels.tsa.stattools import adfuller
 from pyspark.sql.utils import AnalysisException
 import numpy as np
 from statsmodels.tsa.seasonal import STL
+from statsmodels.tsa.stattools import ccf 
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import kpss
 from matplotlib.ticker import MaxNLocator, AutoMinorLocator
@@ -609,11 +610,7 @@ driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Fo
 
 # ### Stage 2: Target Transformation
 # **Purpose:** Align target + drivers
-# ### Transformations
-# - if stationary then no transformations
-# - if only adf was stationary then detrend
-# - if only kpss was stationary then log + diff the data
-# - if both then log + diff the data 
+# ##### Transformations - Apply STL in order to only do the correlation analysis upon the residuals
 # ---
 
 # CELL ********************
@@ -858,7 +855,7 @@ drivers_FE_unpivot = spark.read.table("Sales_Forecasting.silver.feature_set")
 
 # MARKDOWN ********************
 
-# #### Apply STL to all drivers and series before CCF analysis
+# ## Apply STL to all drivers and series before CCF analysis
 
 # CELL ********************
 
@@ -995,21 +992,361 @@ feature_set_residuals = feature_set_valid.groupBy("Country","Indicator", "Region
 
 # MARKDOWN ********************
 
-# # Next Steps
-# ### 0. Remove bad data
-# - remove invalid / sparse drivers
-# 
-# 
-# 
-# ### 2. Stationary Classification
-# - remove Drivers that aren't valid  
-# - Join Raw Time Series w/ Drivers
-# - transform / difference which series is Non Stationary 
-# 
-#         input: entire feature set and raw target time series
-#         output: differenced or original target/feature series based on classification
-# 
-# 
+# # Stage 3: Lag/Lead Identification of Features
+# #### Application of CCF
+
+# MARKDOWN ********************
+
+# #### Joining target / drivers prior to CCF calculation
+
+# CELL ********************
+
+feature_set_residuals = feature_set_residuals\
+    .drop("Value")\
+    .withColumnsRenamed({"Date":"feature_date", "residual":"feature_residual","Region":"feature_region"})
+
+topline_residuals = topline_residuals\
+    .drop("Value")\
+    .withColumnsRenamed({"Date":"target_date","residual":"target_residual","Region":"topline_region"})
+    
+middle_residuals = middle_residuals\
+    .drop("Value")\
+    .withColumnsRenamed({"Date":"target_date","residual":"target_residual","Region":"middle_region"})
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+## Create valid mapping for target-driver combinations
+
+## create distinct records of each df set
+topline_distinct = topline_residuals.select("series").distinct()
+
+middle_distinct = middle_residuals.select("series","middle_region").distinct()
+
+feature_world_distinct = feature_set_residuals.filter(col("feature_region")=="World").select("feature_region","Country","Indicator","Feature").distinct()
+feature_m_distinct = feature_set_residuals.filter(~(col("feature_region")=="World"))\
+    .select("feature_region","Country","Indicator","Feature").distinct()
+
+
+## create pair dataframes
+topline_pairs = broadcast(topline_distinct).crossJoin(feature_world_distinct)
+
+display(topline_pairs.limit(3))
+
+middle_w_pairs = broadcast(middle_distinct).crossJoin(feature_world_distinct)
+middle_pairs = broadcast(middle_distinct).join(
+    feature_m_distinct,
+    middle_distinct["middle_region"]==feature_m_distinct["feature_region"],
+    "inner"
+)
+
+middle_pairs = middle_pairs.unionByName(middle_w_pairs)
+
+display(middle_pairs.limit(3))
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_pairs.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_pairs")
+middle_pairs.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_pairs")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+## Creating Expanded versions of the middle & topline residuals based on the pair mappings
+    ## both approaches for managing schema/column explosion during join work
+expanded_topline = topline_residuals.join(
+    broadcast(topline_pairs),
+    #topline_residuals["series"]==topline_pairs["series"],
+    ["series"],
+    "left"
+)#.drop(topline_pairs["series"])
+
+display(expanded_topline.limit(5))
+
+expanded_middle = middle_residuals.join(
+    broadcast(middle_pairs),
+    (middle_residuals["series"]==middle_pairs["series"]) & 
+    (middle_residuals["middle_region"] == middle_pairs["middle_region"]),
+    "left"
+).drop(middle_pairs["series"],middle_pairs["middle_region"])
+
+display(expanded_middle.limit(5))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+expanded_topline.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_topline")
+expanded_middle.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_middle")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+## Creating Expanded version of the middle & topline features based on the pair mappings
+expanded_t_features = broadcast(topline_pairs).join(
+    feature_set_residuals,
+    ["feature_region","Indicator","Feature"],
+    "inner"
+).drop(feature_set_residuals["Country"])
+
+display(expanded_t_features.limit(3))
+
+expanded_m_features = broadcast(middle_pairs).join(
+    feature_set_residuals,
+    ["feature_region","Indicator","Feature","Country"],
+    "inner"
+)
+
+display(expanded_m_features.limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+expanded_t_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_t_features")
+expanded_m_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_m_features")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+feature_set_residuals = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_t_features")
+expanded_t_features = feature_set_residuals
+expanded_m_features = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_m_features")
+
+
+expanded_topline = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_topline")
+expanded_middle = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_middle")
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+expanded_topline = spark.createDataFrame(expanded_topline.rdd, expanded_topline.schema)
+expanded_middle = spark.createDataFrame(expanded_middle.rdd, expanded_middle.schema)
+
+expanded_t_features = spark.createDataFrame(expanded_t_features.rdd, expanded_t_features.schema)
+expanded_m_features = spark.createDataFrame(expanded_m_features.rdd, expanded_m_features.schema)
+
+
+t = expanded_topline.alias("t")
+m = expanded_middle.alias("m")
+tf = expanded_t_features.alias("tf")
+mf = expanded_m_features.alias("mf")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+final_topline = t.join(
+    tf,
+    (t["series"] == tf["series"]) &
+    (t["feature_region"] == tf["feature_region"]) &
+    (t["Country"] == tf["Country"]) &
+    (t["Indicator"] == tf["Indicator"]) &
+    (t["Feature"] == tf["Feature"]) &
+    (t["target_date"] == tf["feature_date"]),
+    "left"    
+).select(t["series"],t["Product_Category"],t["target_date"],t["target_residual"],t["feature_region"],t["Country"],
+        t["Indicator"],t["Feature"],tf["feature_residual"])
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+final_topline.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_w_features")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_final = m.join(
+    mf,
+    (m["series"]==mf["series"]) &
+    (m["middle_region"] ==mf["middle_region"]) &
+    (m["feature_region"]==mf["feature_region"]) &
+    (m["Country"]==mf["Country"]) &
+    (m["Indicator"]==mf["Indicator"]) &
+    (m["Feature"]==mf["Feature"]) &
+    (m["target_date"]==mf["feature_date"]),
+    "left"
+).select(m["series"],m["Product_Category"],m["middle_region"],m["target_date"],m["target_residual"],
+        mf["feature_region"],mf["Indicator"],mf["Feature"],mf["Country"],mf["feature_residual"])
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(middle_final.limit(5))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_final.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_w_features")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### CCF Compute
+
+# CELL ********************
+
+def compute_ccf(pdf):
+
+    pdf = pdf.sort_values("date")
+
+    driver = pdf["driver"]
+    target = pdf["target"]
+
+    results = []
+
+    for lag in range(-24, 25):
+
+        if lag < 0:
+
+            corr = (
+                driver.iloc[:lag]
+                .corr(target.iloc[-lag:])
+            )
+
+        elif lag > 0:
+
+            corr = (
+                driver.iloc[lag:]
+                .corr(target.iloc[:-lag])
+            )
+
+        else:
+
+            corr = driver.corr(target)
+
+        results.append({
+            "driver_id": pdf["driver_id"].iloc[0],
+            "lag": lag,
+            "correlation": corr
+        })
+
+    return pd.DataFrame(results)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
 # ### 3. Lag Identification of Engineered Features
 # - apply CCF to identify the top x lead/lags for the feature set
 #         input: differenced or original target/feature series
