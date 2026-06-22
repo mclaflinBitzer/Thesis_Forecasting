@@ -1301,7 +1301,9 @@ middle_final.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecast
 
 # CELL ********************
 
-def compute_ccf(pdf):
+def compute_topline_ccf(pdf):
+
+
 
     pdf = pdf.sort_values("date")
 
@@ -1310,30 +1312,36 @@ def compute_ccf(pdf):
 
     results = []
 
+
     for lag in range(-24, 25):
 
         if lag < 0:
-
-            corr = (
-                driver.iloc[:lag]
-                .corr(target.iloc[-lag:])
-            )
+            d = driver.iloc[:lag]
+            t = target.iloc[-lag:]
 
         elif lag > 0:
-
-            corr = (
-                driver.iloc[lag:]
-                .corr(target.iloc[:-lag])
-            )
+            d = driver.iloc[lag:]
+            t = target.iloc[:-lag]
 
         else:
+            d = driver
+            t = target
 
-            corr = driver.corr(target)
+        corr = d.corr(t) if len(d) > 1 and len(t) > 1 else None
+
 
         results.append({
-            "driver_id": pdf["driver_id"].iloc[0],
-            "lag": lag,
-            "correlation": corr
+            "series": pdf["series"].iloc[0],
+            "feature_region": pdf["feature_region"].iloc[0],
+            "Country": pdf["Country"].iloc[0],
+            "Indicator": pdf["Indicator"].iloc[0],
+            "Feature": pdf["Feature"].iloc[0],
+            "Lag": lag,
+            "Correlation": (
+                            float(0.0)
+                            if corr is None or pd.isna(corr) or np.isinf(corr)
+                            else float(corr)
+                        )
         })
 
     return pd.DataFrame(results)
@@ -1345,13 +1353,132 @@ def compute_ccf(pdf):
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# CELL ********************
+
+def compute_middle_ccf(pdf):
+
+
+
+    pdf = pdf.sort_values("date")
+
+    driver = pdf["driver"]
+    target = pdf["target"]
+
+    results = []
+
+
+    for lag in range(-24, 25):
+
+        if lag < 0:
+            d = driver.iloc[:lag]
+            t = target.iloc[-lag:]
+
+        elif lag > 0:
+            d = driver.iloc[lag:]
+            t = target.iloc[:-lag]
+
+        else:
+            d = driver
+            t = target
+
+        corr = d.corr(t) if len(d) > 1 and len(t) > 1 else None
+
+
+        results.append({
+            "series": pdf["series"].iloc[0],
+            "Product_Category": pdf["Product_Category"].iloc[0],
+            "target_region": pdf["target_region"].iloc[0],
+            "feature_region": pdf["feature_region"].iloc[0],
+            "Country": pdf["Country"].iloc[0],
+            "Indicator": pdf["Indicator"].iloc[0],
+            "Feature": pdf["Feature"].iloc[0],
+            "Lag": lag,
+            "Correlation": (
+                            float(0.0)
+                            if corr is None or pd.isna(corr) or np.isinf(corr)
+                            else float(corr)
+                        )
+        })
+
+    return pd.DataFrame(results)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")\
+    .withColumnsRenamed({"target_date":"date", "target_residual":"target", "feature_residual":"driver"})\
+    .select("series","Product_Category","feature_region","Country","Indicator","Feature","date","target","driver")
+
+middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_w_features")\
+    .withColumnsRenamed({"target_date":"date", "target_residual":"target", "feature_residual":"driver", "middle_region":"target_region"})\
+    .select("series","Product_Category","target_region","feature_region","Country","Indicator","Feature","date","target","driver")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_ccf_schema = (StructType([
+    StructField("series", StringType(), False),
+    StructField("feature_region", StringType(), False),
+    StructField("Country", StringType(), False),
+    StructField("Indicator", StringType(), False),
+    StructField("Feature", StringType(), False),
+    StructField("Lag", IntegerType(), False),
+    StructField("Correlation", DoubleType(), True)
+]))
+
+topline_ccf = topline_w_features.groupBy("series","feature_region","Country","Indicator","Feature")\
+    .applyInPandas(compute_topline_ccf, schema=topline_ccf_schema)
+
+topline_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_ccf_base")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_ccf_schema = (StructType([
+    StructField("series", StringType(), False),
+    StructField("Product_Category", StringType(), True),
+    StructField("target_region", StringType(), True),
+    StructField("feature_region", StringType(), True),
+    StructField("Country", StringType(), True),
+    StructField("Indicator", StringType(), True),
+    StructField("Feature", StringType(), True),
+    StructField("Lag", IntegerType(), True),
+    StructField("Correlation", DoubleType(), True)
+]))
+
+middle_ccf = middle_w_features.groupBy("series","Product_Category","target_region","feature_region","Country","Indicator","Feature")\
+    .applyInPandas(compute_middle_ccf, schema=middle_ccf_schema)
+
+
+middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_ccf_base")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
-# ### 3. Lag Identification of Engineered Features
-# - apply CCF to identify the top x lead/lags for the feature set
-#         input: differenced or original target/feature series
-#         output: top x lead/lag timing of the engineered feature set
-# 
 # ### 4. Feature Selection
 # For each time series w/ all potential driver/feature combinations
 # - Correlation Filtering (Pearson/Spearman) strength threshold/ranking
@@ -1360,6 +1487,308 @@ def compute_ccf(pdf):
 # 
 #         input: raw driver data at lag/lead identified, engineered features at lag/lead identified 
 #         output: take the top x features
+
+# CELL ********************
+
+topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf_base")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_w = Window.partitionBy("series","feature_region","Country","Indicator","Feature")
+topline_ccf = topline_ccf.withColumn("abs_corr", abs(col("Correlation")))
+topline_ccf = topline_ccf.withColumn("max_corr", max(col("abs_corr")).over(topline_w))
+
+## filter out records where there isn't a lag/lead with a correlation > .3 or where Indicator is NaN
+
+topline_ccf_filtered = topline_ccf.filter((col("max_corr")>.3) & (col("Indicator") != "NaN"))
+
+display(topline_ccf_filtered.agg((count("*")/49).alias("num_Ind")))
+display(topline_ccf_filtered
+    .groupBy(round(col("max_corr"),2).alias("max_corr"))
+    .agg((count("*")/49).alias("count_Ind"))
+    .orderBy(desc(col("max_corr"))))
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## VIF application
+# - requires residuals of drivers not the correlation values
+
+# CELL ********************
+
+topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")\
+    .select("series","feature_region","Country","Indicator","Feature","target_date","feature_residual")
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+def VIF_compute(pdf):
+    pdf = pdf.sort_values("target_date")
+    X = pdf.drop(columns=["target_date"])
+
+    # clean data (IMPORTANT)
+    X = X.replace([np.inf, -np.inf], np.nan)
+    X = X.dropna()
+
+    # remove constant columns (VERY IMPORTANT for VIF stability)
+    X = X.loc[:, X.nunique() > 1]
+
+    # ensure numeric only
+    X = X.select_dtypes(include=[np.number])
+
+    # handle missing values
+    X = X.fillna(X.median(numeric_only=True))
+
+
+    vif = pd.DataFrame()
+    vif["feature_id"] = X.columns
+    vif["VIF"] = [
+        variance_inflation_factor(X.values, i)
+        for i in range(X.shape[1])
+    ]
+
+    return vif
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_concat = topline_w_features.withColumn("feature_serie", 
+        concat_ws("__","feature_region","Country","Indicator","Feature"))
+
+feature_series = topline_concat.select("feature_serie").distinct()
+feature_series = feature_series.withColumn("feature_id",row_number().over(Window.orderBy("feature_serie")))
+
+topline_joined = topline_concat.join(feature_series, ["feature_serie"], "left")
+
+topline_wide = topline_joined.groupBy("target_date")\
+    .pivot("feature_id").agg(first("feature_residual"))
+
+display(topline_wide.limit(5))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## Correlation Clustering
+
+# CELL ********************
+
+import pandas as pd
+import numpy as np
+
+import scipy.cluster.hierarchy as sch
+from scipy.spatial.distance import squareform
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+df = topline_wide.toPandas()
+X = df.drop(columns=["target_date"])
+X = X.select_dtypes(include=[np.number])
+X = X.fillna(X.median(numeric_only=True))
+
+corr = X.corr().abs()
+corr = corr.fillna(0)
+corr = np.clip(corr, 0, 1)
+
+display(corr)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+## convert correlation matrix to distance matrix
+distance = 1 - corr
+distance = np.clip(distance, 0, 1)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+
+
+## hierarchical clustering 
+condensed_dist = squareform(distance.values, checks=False)
+
+linkage=sch.linkage(condensed_dist, method="average")
+
+threshold = 0.15
+cluster_labels = sch.fcluster(linkage,t=threshold, criterion="distance")
+
+cluster_map = pd.DataFrame({
+    "feature": X.columns,
+    "cluster": cluster_labels
+})
+
+representatives = []
+for cluster_id in cluster_map["cluster"].unique():
+    features = cluster_map[cluster_map["cluster"] == cluster_id]["feature"].tolist()
+    
+    if len(features) == 1:
+        representatives.append(features[0])
+        continue
+
+    sub_corr = corr.loc[features, features]
+
+    # score = mean correlation to others (higher = more central)
+    scores = sub_corr.mean(axis=1)
+
+    rep = scores.idxmax()
+    representatives.append(rep)
+
+X_reduced = X[representatives]
+
+final_df = pd.concat([df[["target_date"]], X_reduced], axis=1)
+
+display(final_df)
+display(cluster_map.sort_values("cluster"))
+print(representatives)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print(final_df.shape)
+print(df.shape)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+test_schema = (StructType([
+    StructField("feature_id", StringType(), True),
+    StructField("VIF", DoubleType(), True)
+]))
+test = topline_wide.groupBy("target_date").applyInPandas(VIF_compute, schema=test_schema)
+
+display(test)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+test_df = topline_wide.toPandas()
+vif_output = VIF_compute(test_df)
+display(vif_output)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# 
+# 
+# 
 # 
 # ### 5. Complete Economic Validation
 # - validate choices with Dominik for feature selection
