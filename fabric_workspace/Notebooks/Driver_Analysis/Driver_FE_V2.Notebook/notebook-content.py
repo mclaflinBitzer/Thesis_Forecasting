@@ -20,122 +20,6 @@
 # META   }
 # META }
 
-# MARKDOWN ********************
-
-# ### Stage 1: Feature Engineering
-# 
-# **Purpose:** Create candidate predictors
-# 
-# **Features:**
-# - Value (t)
-# - Lags: 1-24
-# - Leads: 1-24
-# - Rolling: mean / median / std (3/6/12M)
-# - Growth: MoM, QoQ, YoY
-# 
-# ---
-# 
-# ### Stage 2: Driver Classification
-# 
-# **Purpose:** Select correct transformations
-# - apply ADF and KPSS
-# 
-# #### Trending Variables
-# **Examples:** GDP, production, commodities  
-# **Traits:** trend, non-stationary  
-# **Transforms:** YoY, growth rates, differencing  
-# 
-# #### Non-Trending Variables
-# **Examples:** inflation, interest rates, utilization  
-# **Traits:** stable mean, mean-reverting  
-# **Transforms:** usually none (check stationarity)
-# 
-# ---
-# 
-# 
-# 
-# ### Stage 3: Target Transformation
-# 
-# **Purpose:** Align target + drivers
-# 
-# **If trending:**
-# - YoY growth
-# - Differencing
-# - Detrending
-# 
-# **If stationary:**
-# - Use levels
-# 
-# ---
-# 
-# ### Stage 4: Cross-Correlation
-# 
-# **Purpose:** Identify lead/lag effects
-# 
-# **Evaluate:**
-# - Target vs driver level
-# - Target vs lags
-# - Target vs leads
-# 
-# **Metrics:**
-# - Pearson correlation (linear)
-# - Cross-correlation function (lead/lag)
-# 
-# **Rule:**
-# Prefer stable lag ranges, not single spikes
-# 
-# ---
-# 
-# ### Stage 5: Correlation Filtering
-# 
-# **Purpose:** Remove weak signals
-# 
-# - Keep |corr| > 0.20 or top N
-# - Check stability across windows
-# - Ensure sufficient observations
-# 
-# ---
-# 
-# ### Stage 6: Multicollinearity
-# 
-# **Purpose:** Remove redundant drivers
-# 
-# - Drop |corr| > 0.80
-# - VIF > 5–10
-# 
-# ---
-# 
-# ### Stage 7: Economic Validation
-# 
-# **Purpose:** Ensure business logic
-# 
-# **Checks:**
-# - Causality plausible
-# - Lag realistic
-# - Interpretable relationship
-# 
-# **Example:**
-# ✔ Industrial production → demand  
-# ✖ Random unrelated signal
-# 
-# ---
-# 
-# ### Stage 8: Final Selection
-# 
-# **Scoring weights:**
-# - Correlation: 30%
-# - Stability: 20%
-# - Forecast availability: 20%
-# - Economic logic: 15%
-# - Model importance: 15%
-# 
-# **Importance methods:**
-# - Random Forest
-# - XGBoost
-# - SHAP
-# - Permutation importance
-
-
 # CELL ********************
 
 from pyspark.sql.functions import *
@@ -166,6 +50,10 @@ from scipy.spatial.distance import squareform
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# #### ADF Test
+
 # CELL ********************
 
 compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
@@ -177,125 +65,6 @@ compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers")
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# MARKDOWN ********************
-
-# ### 1. Feature Engineering
-# For each Driver create the following using original data
-# - Rolling (3, 6, 12) std, mean
-# - Growth (YoY, MoM, diff)
-# 
-#         input: original / raw driver data
-#         output: engineered features
-
-# CELL ********************
-
-## Feature Transformations to do
-    ## levels
-    ## Rolling Mean / STD (3,6,12)
-    ## Growth: YoY, MoM, diff
-
-## levels
-drivers_FE = compiled_drivers.withColumn("level", col("Value"))
-
-## Window creation
-w = Window.partitionBy("Region", "Country","Indicator").orderBy("Date")
-w_3 = Window.partitionBy("Region", "Country","Indicator").orderBy("Date").rowsBetween(-2,0)
-w_6 = Window.partitionBy("Region", "Country", "Indicator").orderBy("Date").rowsBetween(-5,0)
-w_12 = Window.partitionBy("Region", "Country", "Indicator").orderBy("Date").rowsBetween(-11,0)
-
-## Rolling Means
-drivers_FE = drivers_FE.withColumn("rolling_mean_3", avg("Value").over(w_3))
-drivers_FE = drivers_FE.withColumn("rolling_mean_6", avg("Value").over(w_6))
-drivers_FE = drivers_FE.withColumn("rolling_mean_12", avg("Value").over(w_12))
-
-## Rolling STD
-drivers_FE = drivers_FE.withColumn("rolling_std_3", stddev("Value").over(w_3))
-drivers_FE = drivers_FE.withColumn("rolling_std_6", stddev("Value").over(w_6))
-drivers_FE = drivers_FE.withColumn("rolling_std_12", stddev("Value").over(w_12))
-
-
-## Growth: YoY, MoM, Diff
-drivers_FE = drivers_FE.withColumn("diff", (col("Value") - lag("Value", 1).over(w)))
-drivers_FE = drivers_FE.withColumn("YoY_pct", 
-                        when(lag("Value",12).over(w) == 0, None)
-                        .otherwise((col("Value")/lag("Value",12).over(w)) -1))
-drivers_FE = drivers_FE.withColumn("MoM_pct",
-                        when(lag("Value",1).over(w)==0, None)
-                        .otherwise((col("Value") / lag("Value", 1).over(w))-1))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# #### Unpivoting the Features in order to apply ADF & KPSS testing
-
-# CELL ********************
-
-drivers_FE_unpivot = drivers_FE.select("Country","Indicator","Region", "Date",
-    expr("""
-        stack(10,
-        'level', level,
-        'rolling_mean_3', rolling_mean_3,
-        'rolling_mean_6', rolling_mean_6,
-        'rolling_mean_12', rolling_mean_12,
-        'rolling_std_3', rolling_std_3,
-        'rolling_std_6', rolling_std_6,
-        'rolling_std_12', rolling_std_12,
-        'diff', diff,
-        'YoY_pct', YoY_pct,
-        'MoM_pct', MoM_pct
-        ) as (Feature, Value)
-    """)
-)
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-drivers_FE_unpivot.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.silver.feature_set")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Stage 2: Driver Classification
-# 
-# **Purpose:** Select idenfity driver behavior
-# 
-# Step 1: Stationarity test
-# 
-# • ADF test & KPSS
-# 
-# 
-# Step 2: Classify
-# 
-# - If strong trend → "Trending"
-# - If mean-reverting → "Non-trending"
-# 
-# Step 3: Store metadata
-# Create a driver config table:
-
-
-# MARKDOWN ********************
-
-# #### ADF test
-
 # CELL ********************
 
 def adf_group(df):
@@ -304,7 +73,6 @@ def adf_group(df):
     country = pdf["Country"].iloc[0]
     indicator = pdf["Indicator"].iloc[0]
     region = pdf["Region"].iloc[0]
-    feature = pdf["Feature"].iloc[0]
 
     ts = (
         pd.to_numeric(pdf["Value"], errors="coerce")
@@ -319,7 +87,6 @@ def adf_group(df):
             "Country": country,
             "Indicator": indicator,
             "Region": region,
-            "Feature": feature,
             "adf_stat": None,
             "adf_p_value": None,
             "adf_stationary_flag": "Insufficient Data"            
@@ -330,7 +97,6 @@ def adf_group(df):
             "Country": country,
             "Indicator": indicator,
             "Region": region,
-            "Feature": feature,
             "adf_stat": None,
             "adf_p_value": None,
             "adf_stationary_flag": "Constant Series (Skipped)"
@@ -345,7 +111,6 @@ def adf_group(df):
             "Country": country,
             "Indicator": indicator,
             "Region": region,
-            "Feature": feature,
             "adf_stat": adf_stat,
             "adf_p_value": p_value,
             "adf_stationary_flag": (
@@ -359,7 +124,6 @@ def adf_group(df):
             "Country": country,
             "Indicator": indicator,
             "Region": region,
-            "Feature": feature,
             "adf_stat": None,
             "adf_p_value": None,
             "adf_stationary_flag": f"ADF Failed: {str(e)}"
@@ -378,14 +142,13 @@ adf_schema = StructType([
     StructField("Country", StringType(), False),
     StructField("Indicator", StringType(), False),
     StructField("Region", StringType(), False),
-    StructField("Feature", StringType(), False),
     StructField("adf_stat", DoubleType(), True),
     StructField("adf_p_value", DoubleType(), True),
     StructField("adf_stationary_flag", StringType(), True)
 ])
 
-adf_results = (drivers_FE_unpivot
-                    .groupBy("Country","Indicator","Region","Feature")
+adf_results = (compiled_drivers
+                    .groupBy("Country","Indicator","Region")
                     .applyInPandas(adf_group, schema=adf_schema)
 )
 
@@ -408,7 +171,6 @@ def kpss_group(df):
     country = pdf["Country"].iloc[0]
     indicator = pdf["Indicator"].iloc[0]
     region = pdf["Region"].iloc[0]
-    feature = pdf["Feature"].iloc[0]
 
     # FORCE CLEAN NUMERIC PIPELINE
     ts = (
@@ -424,7 +186,6 @@ def kpss_group(df):
             "Country": country,
             "Indicator": indicator,
             "Region": region,
-            "Feature": feature,
             "kpss_stat": None,
             "kpss_p_value": None,
             "kpss_stationary_flag": "Insufficient Data (<12 obs)"
@@ -436,7 +197,6 @@ def kpss_group(df):
             "Country": country,
             "Indicator": indicator,
             "Region": region,
-            "Feature": feature,
             "kpss_stat": None,
             "kpss_p_value": None,
             "kpss_stationary_flag": "Constant Series (Skipped)"
@@ -455,7 +215,6 @@ def kpss_group(df):
                 "Country": country,
                 "Indicator": indicator,
                 "Region": region,
-                "Feature": feature,
                 "kpss_stat": kpss_stat,
                 "kpss_p_value": p_value,
                 "kpss_stationary_flag": 
@@ -469,7 +228,6 @@ def kpss_group(df):
                 "Country": country,
                 "Indicator": indicator,
                 "Region": region,
-                "Feature": feature,
                 "kpss_stat": None,
                 "kpss_p_value": None,
                 "kpss_stationary_flag": f"KPSS Failed: {str(e)}"
@@ -488,13 +246,12 @@ kpss_schema = StructType([
                     StructField("Country", StringType(), False),
                     StructField("Indicator", StringType(), False),
                     StructField("Region", StringType(), False),
-                    StructField("Feature", StringType(), False),
                     StructField("kpss_stat", DoubleType(), True),
                     StructField("kpss_p_value", DoubleType(), True),
                     StructField("kpss_stationary_flag", StringType(), False)
 ])
 
-kpss_results = (drivers_FE_unpivot.groupBy("Country", "Indicator","Region", "Feature")
+kpss_results = (compiled_drivers.groupBy("Country", "Indicator","Region")
                     .applyInPandas(kpss_group, schema=kpss_schema))
 
 # METADATA ********************
@@ -516,16 +273,8 @@ kpss_results = (drivers_FE_unpivot.groupBy("Country", "Indicator","Region", "Fea
 
 # CELL ********************
 
-df_stationary_stats = adf_results.join(kpss_results, ["Country", "Indicator","Region","Feature"])
+df_stationary_stats = adf_results.join(kpss_results, ["Country", "Indicator","Region"])
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 ## add valid/invalid flag
     ## if valid then 1 otherwise 0
@@ -538,15 +287,6 @@ df_stationary_stats = df_stationary_stats.withColumn("valid_flag",
     ).otherwise(lit(1))
     
 )
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 driver_final_stats = df_stationary_stats.withColumn(
     "ADF_is_stationary",
@@ -572,16 +312,8 @@ driver_final_stats = driver_final_stats.withColumn(
     )\
     .drop("ADF_status","KPSS_status","ADF_is_stationary","KPSS_is_stationary")
 
-# METADATA ********************
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.driver_stats")
+driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.driver_stats")
 
 # METADATA ********************
 
@@ -592,18 +324,14 @@ driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Fo
 
 # MARKDOWN ********************
 
-# ### Stage 2: Target Transformation
-# **Purpose:** Align target + drivers
+# ## Stage 2: Target / Driver Transformations
+# **Purpose:** Align target + driver values using STL decomposition
 # ##### Transformations - Apply STL in order to only do the correlation analysis upon the residuals
 # ---
 
-# MARKDOWN ********************
-
-# ## Apply STL to all drivers and series before CCF analysis
-
 # CELL ********************
 
-feature_set = spark.read.table("Sales_Forecasting.silver.feature_set")
+feature_set = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
 topline_cutoff_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data").withColumnRenamed("Quantity","Value")
 middle_cutoff_data = spark.read.table("Sales_Forecasting.silver.middle_cutoff_data").withColumnRenamed("Quantity","Value")
 
@@ -616,7 +344,7 @@ middle_cutoff_data = spark.read.table("Sales_Forecasting.silver.middle_cutoff_da
 
 # CELL ********************
 
-driver_classification = spark.read.table("Sales_Forecasting.Driver_Exploration.driver_stats")\
+driver_classification = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.driver_stats")\
         .drop('adf_stat',
             'adf_p_value',
             'adf_stationary_flag',
@@ -624,19 +352,10 @@ driver_classification = spark.read.table("Sales_Forecasting.Driver_Exploration.d
             'kpss_p_value',
             'kpss_stationary_flag',)
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 feature_set_valid = broadcast(
     driver_classification.filter(col("valid_flag")==1)
 ).join(
-    feature_set, ["Country","Indicator","Region","Feature"], "inner"
+    feature_set, ["Country","Indicator","Region"], "inner"
 ).drop("valid_flag","stationary_class")
 
 # METADATA ********************
@@ -684,15 +403,6 @@ topline_residuals = topline_cutoff_data.groupBy("Product_Category","series")\
             schema=topline_schema
         )
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 middle_schema = StructType([
     StructField("Product_Category", StringType(), False),
     StructField("Region", StringType(), False),
@@ -718,13 +428,12 @@ feature_set_schema = StructType([
     StructField("Country", StringType(), False),
     StructField("Indicator", StringType(), False),
     StructField("Region", StringType(), False),
-    StructField("Feature", StringType(), False),
     StructField("Date", DateType(), False),
     StructField("Value", DoubleType(), True),
     StructField("residual", DoubleType(), True)
 ])
 
-feature_set_residuals = feature_set_valid.groupBy("Country","Indicator", "Region", "Feature")\
+feature_set_residuals = feature_set_valid.groupBy("Country","Indicator", "Region")\
     .applyInPandas(stl_decompose, schema=feature_set_schema)
 
 # METADATA ********************
@@ -738,10 +447,19 @@ feature_set_residuals = feature_set_valid.groupBy("Country","Indicator", "Region
 
 # # Stage 3: Lag/Lead Identification of Features
 # #### Application of CCF
-
-# MARKDOWN ********************
-
+# 
 # #### Joining target / drivers prior to CCF calculation
+
+# CELL ********************
+
+middle_residuals.columns
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
 # CELL ********************
 
@@ -765,6 +483,10 @@ middle_residuals = middle_residuals\
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# ##### Create mapping of features to targets
+
 # CELL ********************
 
 ## Create valid mapping for target-driver combinations
@@ -774,15 +496,15 @@ topline_distinct = topline_residuals.select("series").distinct()
 
 middle_distinct = middle_residuals.select("series","target_region").distinct()
 
-feature_world_distinct = feature_set_residuals.filter(col("feature_region")=="World").select("feature_region","Country","Indicator","Feature").distinct()
+feature_world_distinct = feature_set_residuals.filter(col("feature_region")=="World").select("feature_region","Country","Indicator").distinct()
 feature_m_distinct = feature_set_residuals.filter(~(col("feature_region")=="World"))\
-    .select("feature_region","Country","Indicator","Feature").distinct()
+    .select("feature_region","Country","Indicator").distinct()
 
 
 ## create pair dataframes
 topline_pairs = broadcast(topline_distinct).crossJoin(feature_world_distinct)
 
-display(topline_pairs.limit(3))
+
 
 middle_w_pairs = broadcast(middle_distinct).crossJoin(feature_world_distinct)
 middle_pairs = broadcast(middle_distinct).join(
@@ -792,8 +514,6 @@ middle_pairs = broadcast(middle_distinct).join(
 )
 
 middle_pairs = middle_pairs.unionByName(middle_w_pairs)
-
-display(middle_pairs.limit(3))
 
 
 # METADATA ********************
@@ -805,8 +525,8 @@ display(middle_pairs.limit(3))
 
 # CELL ********************
 
-topline_pairs.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_pairs")
-middle_pairs.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_pairs")
+topline_pairs.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_pairs")
+middle_pairs.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_pairs")
 
 # METADATA ********************
 
@@ -832,9 +552,9 @@ display(expanded_topline.limit(5))
 expanded_middle = middle_residuals.join(
     broadcast(middle_pairs),
     (middle_residuals["series"]==middle_pairs["series"]) & 
-    (middle_residuals["middle_region"] == middle_pairs["middle_region"]),
+    (middle_residuals["target_region"] == middle_pairs["target_region"]),
     "left"
-).drop(middle_pairs["series"],middle_pairs["middle_region"])
+).drop(middle_pairs["series"],middle_pairs["target_region"])
 
 display(expanded_middle.limit(5))
 
@@ -847,8 +567,8 @@ display(expanded_middle.limit(5))
 
 # CELL ********************
 
-expanded_topline.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_topline")
-expanded_middle.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_middle")
+expanded_topline.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.expanded_topline")
+expanded_middle.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.expanded_middle")
 
 # METADATA ********************
 
@@ -862,7 +582,7 @@ expanded_middle.write.format("delta").mode("overwrite").saveAsTable("Sales_Forec
 ## Creating Expanded version of the middle & topline features based on the pair mappings
 expanded_t_features = broadcast(topline_pairs).join(
     feature_set_residuals,
-    ["feature_region","Indicator","Feature"],
+    ["feature_region","Indicator"],
     "inner"
 ).drop(feature_set_residuals["Country"])
 
@@ -870,7 +590,7 @@ display(expanded_t_features.limit(3))
 
 expanded_m_features = broadcast(middle_pairs).join(
     feature_set_residuals,
-    ["feature_region","Indicator","Feature","Country"],
+    ["feature_region","Indicator","Country"],
     "inner"
 )
 
@@ -885,8 +605,8 @@ display(expanded_m_features.limit(3))
 
 # CELL ********************
 
-expanded_t_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_t_features")
-expanded_m_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.expanded_m_features")
+expanded_t_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.expanded_t_features")
+expanded_m_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.expanded_m_features")
 
 # METADATA ********************
 
@@ -907,12 +627,13 @@ expanded_m_features.write.format("delta").mode("overwrite").saveAsTable("Sales_F
 
 # CELL ********************
 
-expanded_t_features = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_t_features")
-expanded_m_features = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_m_features")
+## joining the feature and target residuals based on the pair mapping built within both dataframes
+expanded_t_features = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.expanded_t_features")
+expanded_m_features = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.expanded_m_features")
 
 
-expanded_topline = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_topline")
-expanded_middle = spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_middle")
+expanded_topline = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.expanded_topline")
+expanded_middle = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.expanded_middle")
 
 
 # METADATA ********************
@@ -924,11 +645,11 @@ expanded_middle = spark.read.table("Sales_Forecasting.Driver_Exploration.expande
 
 # CELL ********************
 
-expanded_topline = spark.createDataFrame(expanded_topline.rdd, expanded_topline.schema)
-expanded_middle = spark.createDataFrame(expanded_middle.rdd, expanded_middle.schema)
+# expanded_topline = spark.createDataFrame(expanded_topline.rdd, expanded_topline.schema)
+# expanded_middle = spark.createDataFrame(expanded_middle.rdd, expanded_middle.schema)
 
-expanded_t_features = spark.createDataFrame(expanded_t_features.rdd, expanded_t_features.schema)
-expanded_m_features = spark.createDataFrame(expanded_m_features.rdd, expanded_m_features.schema)
+# expanded_t_features = spark.createDataFrame(expanded_t_features.rdd, expanded_t_features.schema)
+# expanded_m_features = spark.createDataFrame(expanded_m_features.rdd, expanded_m_features.schema)
 
 
 t = expanded_topline.alias("t")
@@ -936,14 +657,6 @@ m = expanded_middle.alias("m")
 tf = expanded_t_features.alias("tf")
 mf = expanded_m_features.alias("mf")
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 final_topline = t.join(
     tf,
@@ -951,31 +664,10 @@ final_topline = t.join(
     (t["feature_region"] == tf["feature_region"]) &
     (t["Country"] == tf["Country"]) &
     (t["Indicator"] == tf["Indicator"]) &
-    (t["Feature"] == tf["Feature"]) &
     (t["target_date"] == tf["feature_date"]),
     "left"    
 ).select(t["series"],t["Product_Category"],t["target_date"],t["target_residual"],t["feature_region"],t["Country"],
-        t["Indicator"],t["Feature"],tf["feature_residual"])
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-final_topline.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_w_features")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
+        t["Indicator"],tf["feature_residual"])
 
 middle_final = m.join(
     mf,
@@ -984,11 +676,10 @@ middle_final = m.join(
     (m["feature_region"]==mf["feature_region"]) &
     (m["Country"]==mf["Country"]) &
     (m["Indicator"]==mf["Indicator"]) &
-    (m["Feature"]==mf["Feature"]) &
     (m["target_date"]==mf["feature_date"]),
     "left"
 ).select(m["series"],m["Product_Category"],m["target_region"],m["target_date"],m["target_residual"],
-        mf["feature_region"],mf["Indicator"],mf["Feature"],mf["Country"],mf["feature_residual"])
+        mf["feature_region"],mf["Indicator"],mf["Country"],mf["feature_residual"])
 
 # METADATA ********************
 
@@ -999,17 +690,8 @@ middle_final = m.join(
 
 # CELL ********************
 
-middle_final.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_w_features")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+final_topline.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_w_features")
+middle_final.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_w_features")
 
 # METADATA ********************
 
@@ -1030,13 +712,11 @@ middle_final.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecast
 
 # MARKDOWN ********************
 
-# #### CCF Compute
+# ### CCF Compute
 
 # CELL ********************
 
 def compute_ccf(pdf):
-
-
 
     pdf = pdf.sort_values("date")
 
@@ -1070,7 +750,6 @@ def compute_ccf(pdf):
                 "feature_region": pdf["feature_region"].iloc[0],
                 "Country": pdf["Country"].iloc[0],
                 "Indicator": pdf["Indicator"].iloc[0],
-                "Feature": pdf["Feature"].iloc[0],
                 "Lag": lag,
                 "Correlation": (
                                 float(0.0)
@@ -1078,13 +757,13 @@ def compute_ccf(pdf):
                                 else float(corr)
                             )
             })
+
         else:
             results.append({
                 "series": pdf["series"].iloc[0],
                 "feature_region": pdf["feature_region"].iloc[0],
                 "Country": pdf["Country"].iloc[0],
                 "Indicator": pdf["Indicator"].iloc[0],
-                "Feature": pdf["Feature"].iloc[0],
                 "Lag": lag,
                 "Correlation": (
                                 float(0.0)
@@ -1104,13 +783,13 @@ def compute_ccf(pdf):
 
 # CELL ********************
 
-topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")\
+topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_w_features")\
     .withColumnsRenamed({"target_date":"date", "target_residual":"target", "feature_residual":"driver"})\
-    .select("series","Product_Category","feature_region","Country","Indicator","Feature","date","target","driver")
+    .select("series","Product_Category","feature_region","Country","Indicator","date","target","driver")
 
-middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_w_features")\
-    .withColumnsRenamed({"target_date":"date", "target_residual":"target", "feature_residual":"driver", "middle_region":"target_region"})\
-    .select("series","Product_Category","target_region","feature_region","Country","Indicator","Feature","date","target","driver")
+middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_w_features")\
+    .withColumnsRenamed({"target_date":"date", "target_residual":"target", "feature_residual":"driver"})\
+    .select("series","Product_Category","target_region","feature_region","Country","Indicator","date","target","driver")
 
 # METADATA ********************
 
@@ -1126,15 +805,28 @@ topline_ccf_schema = (StructType([
     StructField("feature_region", StringType(), False),
     StructField("Country", StringType(), False),
     StructField("Indicator", StringType(), False),
-    StructField("Feature", StringType(), False),
     StructField("Lag", IntegerType(), False),
     StructField("Correlation", DoubleType(), True)
 ]))
 
-topline_ccf = topline_w_features.groupBy("series","feature_region","Country","Indicator","Feature")\
+topline_ccf = topline_w_features.groupBy("series","feature_region","Country","Indicator")\
     .applyInPandas(compute_ccf, schema=topline_ccf_schema)
 
-topline_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_ccf_base")
+
+middle_ccf_schema = (StructType([
+    StructField("series", StringType(), False),
+    StructField("Product_Category", StringType(), True),
+    StructField("target_region", StringType(), True),
+    StructField("feature_region", StringType(), True),
+    StructField("Country", StringType(), True),
+    StructField("Indicator", StringType(), True),
+    StructField("Lag", IntegerType(), True),
+    StructField("Correlation", DoubleType(), True)
+]))
+
+middle_ccf = middle_w_features.groupBy("series","Product_Category","target_region","feature_region","Country","Indicator")\
+    .applyInPandas(compute_ccf, schema=middle_ccf_schema)
+
 
 # METADATA ********************
 
@@ -1145,23 +837,8 @@ topline_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasti
 
 # CELL ********************
 
-middle_ccf_schema = (StructType([
-    StructField("series", StringType(), False),
-    StructField("Product_Category", StringType(), True),
-    StructField("target_region", StringType(), True),
-    StructField("feature_region", StringType(), True),
-    StructField("Country", StringType(), True),
-    StructField("Indicator", StringType(), True),
-    StructField("Feature", StringType(), True),
-    StructField("Lag", IntegerType(), True),
-    StructField("Correlation", DoubleType(), True)
-]))
-
-middle_ccf = middle_w_features.groupBy("series","Product_Category","target_region","feature_region","Country","Indicator","Feature")\
-    .applyInPandas(compute_ccf, schema=middle_ccf_schema)
-
-
-middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_ccf_base")
+topline_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_ccf_base")
+middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_ccf_base")
 
 # METADATA ********************
 
@@ -1172,7 +849,7 @@ middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecastin
 
 # MARKDOWN ********************
 
-# ### 4. Feature Selection
+# ## Stage 4: Feature Selection
 # For each time series w/ all potential driver/feature combinations
 # - Correlation Filtering (Pearson/Spearman) strength threshold/ranking
 # - Feature Cluster filtering 
@@ -1182,8 +859,33 @@ middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecastin
 
 # CELL ********************
 
-topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf_base")
-middle_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_ccf_base")
+topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_ccf_base")
+middle_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_ccf_base")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print(topline_ccf.columns)
+print(middle_ccf.columns)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(topline_ccf.select('series','feature_region','Country','Indicator').distinct().groupBy('series').count())
+display(middle_ccf.select('series','feature_region','Country','Indicator').distinct().groupBy('series').count())
+
 
 # METADATA ********************
 
@@ -1195,28 +897,27 @@ middle_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_ccf_b
 # CELL ********************
 
 def ccf_filtering(df):
-    window = Window.partitionBy("series","feature_region","Country","Indicator","Feature")
+    window = Window.partitionBy("series","feature_region","Country","Indicator")
     df = df.withColumn("abs_corr", abs(col("Correlation")))
     df = df.withColumn("max_corr", max(col("abs_corr")).over(window))
 
+
     ## filter out records with a correlations < .3 or Indicator is NaN
     df_filtered = df.filter(
-        (col("max_corr") > 0.3) &
-        (col("max_corr") < .95) &
+        (col("max_corr") > 0.15) &
+        # (col("max_corr") < .95) &
         (col("Indicator").isNotNull()) &
         (col("Indicator") != "NaN")
     )
 
-    df_ranked = df_filtered.groupBy("series","feature_region","Country","Indicator","Feature").agg(first(col("max_corr")).alias("max_corr"))
+    df_ranked = df_filtered.groupBy("series","feature_region","Country","Indicator").agg(first(col("max_corr")).alias("max_corr"))
 
     w = Window.partitionBy("series").orderBy(desc("max_corr"))
 
     df_ranked = df_ranked.withColumn("rank", rank().over(w))
     df_rank_filtered = df_ranked.filter(col("rank")<=500)
 
-    df_final_filtered = df_rank_filtered.join(df_filtered, ['series','feature_region','Country','Indicator','Feature'], 'inner').drop(df_rank_filtered['max_corr'],df_rank_filtered['rank'])
-
-
+    df_final_filtered = df_rank_filtered.join(df_filtered, ['series','feature_region','Country','Indicator'], 'inner').drop(df_rank_filtered['max_corr'],df_rank_filtered['rank'])
 
     return df_final_filtered
 
@@ -1232,7 +933,6 @@ def ccf_filtering(df):
 topline_ccf_filtered = ccf_filtering(topline_ccf)
 middle_ccf_filtered = ccf_filtering(middle_ccf)
 
-
 # METADATA ********************
 
 # META {
@@ -1242,8 +942,8 @@ middle_ccf_filtered = ccf_filtering(middle_ccf)
 
 # CELL ********************
 
-topline_ccf_filtered.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_ccf_filtered") 
-middle_ccf_filtered.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_ccf_filtered")
+topline_ccf_filtered.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_ccf_filtered") 
+middle_ccf_filtered.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_ccf_filtered")
 
 # METADATA ********************
 
@@ -1355,11 +1055,11 @@ def corr_clustering(df):
 def top_20_feature_extraction(df_f_resid, df_ccf_filtered):
     ## creating a key column for feature/serie combinations
     df_f_resid = df_f_resid.withColumn("feature_serie",
-        concat_ws("__", "series","feature_region","Country","Indicator","Feature"))
+        concat_ws("__", "series","feature_region","Country","Indicator"))
 
 
     df_ccf_filtered = df_ccf_filtered.withColumn("feature_serie",
-        concat_ws("__", "series","feature_region","Country","Indicator","Feature"))
+        concat_ws("__", "series","feature_region","Country","Indicator"))
     
     ## creating the feature_id for the feature/serie combinations that persisted after filtering
     feature_series = df_ccf_filtered.select("feature_serie").distinct()
@@ -1371,7 +1071,7 @@ def top_20_feature_extraction(df_f_resid, df_ccf_filtered):
 
     initial_joined_df = feature_series.join(df_ccf_filtered, ["feature_serie"], "left")
     joined_df = initial_joined_df.join(df_f_resid, ['feature_serie'], 'inner')\
-        .drop(r["series"],r["feature_region"],r["Country"],r["Indicator"],r["Feature"],r["feature_serie"])
+        .drop(r["series"],r["feature_region"],r["Country"],r["Indicator"],r["feature_serie"])
 
 
 
@@ -1441,7 +1141,7 @@ def top_20_feature_extraction(df_f_resid, df_ccf_filtered):
 
     post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
 
-    top_20_features = post_cluster_filtering.filter(col("feature_rank")<=20).select("series","feature_region","Country","Indicator","Feature","Lag","Correlation","abs_corr","max_corr","feature_rank")
+    top_20_features = post_cluster_filtering.filter(col("feature_rank")<=20).select("series","feature_region","Country","Indicator","Lag","Correlation","abs_corr","max_corr","feature_rank")
     top_20_features = top_20_features.withColumn("rec_lag", 
         when(col("abs_corr")==col("max_corr"),lit(1)).otherwise(lit(0)))
 
@@ -1459,13 +1159,13 @@ def top_20_feature_extraction(df_f_resid, df_ccf_filtered):
 
 # CELL ********************
 
-middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_w_features")\
-    .select("series","feature_region","Country","Indicator","Feature","target_date","feature_residual")
-topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")\
-    .select("series","feature_region","Country","Indicator","Feature","target_date","feature_residual")
+middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_w_features")\
+    .select("series","feature_region","Country","Indicator","target_date","feature_residual")
+topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_w_features")\
+    .select("series","feature_region","Country","Indicator","target_date","feature_residual")
 
-middle_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_ccf_filtered")
-topline_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf_filtered")
+middle_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_ccf_filtered")
+topline_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_ccf_filtered")
 
 
 # METADATA ********************
@@ -1491,8 +1191,18 @@ final_topline_features = top_20_feature_extraction(topline_w_features, topline_c
 
 # CELL ********************
 
-final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_20_features")
-final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_20_features")
+final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_20_features")
+final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_20_features")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # METADATA ********************
 
@@ -1509,8 +1219,8 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 
 # CELL ********************
 
-topline_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_20_features")
-topline_feature_selection = topline_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator","Feature"))
+topline_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_20_features")
+topline_feature_selection = topline_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator"))
 print(topline_feature_selection.columns)
 display(topline_feature_selection.select('series').distinct())
 
@@ -1534,8 +1244,8 @@ display(topline_feature_selection.filter(col("series")=="ALU"))
 
 # CELL ********************
 
-middle_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_20_features")
-middle_feature_selection = middle_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator","Feature"))
+middle_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_20_features")
+middle_feature_selection = middle_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator"))
 print(middle_feature_selection.columns)
 display(middle_feature_selection.select('series').distinct().orderBy("series"))
 
@@ -1557,25 +1267,6 @@ display(middle_feature_selection.filter(col("series")=='PISTON___APAC'))
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# MARKDOWN ********************
-
-# ### 6. Input target time series & top x selected Features into Models & Forecast
-
-# MARKDOWN ********************
-
-# ### Stage 8: Final Selection
-# **Scoring weights:**
-# - Correlation: 30%
-# - Stability: 20%
-# - Forecast availability: 20%
-# - Economic logic: 15%
-# - Model importance: 15%
-# **Importance methods:**
-# - Random Forest
-# - XGBoost
-# - SHAP
-# - Permutation importance
-
 # CELL ********************
 
 
@@ -1586,8 +1277,55 @@ display(middle_feature_selection.filter(col("series")=='PISTON___APAC'))
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# ## Feature Expansion / Engineering
+# For each Driver create the following using original data
+# - Rolling (3, 6, 12) std, mean
+# - Growth (YoY, MoM, diff)
+# 
+#         input: filtered drivers, raw data
+#         output: engineered features
+
+# MARKDOWN ********************
+
+# ## Need to filter w/ the filtered/chosen features
+
 # CELL ********************
 
+## Feature Transformations to do
+    ## levels
+    ## Rolling Mean / STD (3,6,12)
+    ## Growth: YoY, MoM, diff
+
+## levels
+drivers_FE = compiled_drivers.withColumn("level", col("Value"))
+
+## Window creation
+w = Window.partitionBy("Region", "Country","Indicator").orderBy("Date")
+w_3 = Window.partitionBy("Region", "Country","Indicator").orderBy("Date").rowsBetween(-2,0)
+w_6 = Window.partitionBy("Region", "Country", "Indicator").orderBy("Date").rowsBetween(-5,0)
+w_12 = Window.partitionBy("Region", "Country", "Indicator").orderBy("Date").rowsBetween(-11,0)
+
+## Rolling Means
+drivers_FE = drivers_FE.withColumn("rolling_mean_3", avg("Value").over(w_3))
+drivers_FE = drivers_FE.withColumn("rolling_mean_6", avg("Value").over(w_6))
+drivers_FE = drivers_FE.withColumn("rolling_mean_12", avg("Value").over(w_12))
+
+## Rolling STD
+drivers_FE = drivers_FE.withColumn("rolling_std_3", stddev("Value").over(w_3))
+drivers_FE = drivers_FE.withColumn("rolling_std_6", stddev("Value").over(w_6))
+drivers_FE = drivers_FE.withColumn("rolling_std_12", stddev("Value").over(w_12))
+
+
+## Growth: YoY, MoM, Diff
+drivers_FE = drivers_FE.withColumn("diff", (col("Value") - lag("Value", 1).over(w)))
+drivers_FE = drivers_FE.withColumn("YoY_pct", 
+                        when(lag("Value",12).over(w) == 0, None)
+                        .otherwise((col("Value")/lag("Value",12).over(w)) -1))
+drivers_FE = drivers_FE.withColumn("MoM_pct",
+                        when(lag("Value",1).over(w)==0, None)
+                        .otherwise((col("Value") / lag("Value", 1).over(w))-1))
 
 # METADATA ********************
 
