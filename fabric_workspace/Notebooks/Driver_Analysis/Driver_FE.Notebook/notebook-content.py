@@ -156,6 +156,8 @@ from statsmodels.tsa.stattools import kpss
 from matplotlib.ticker import MaxNLocator, AutoMinorLocator
 from matplotlib.ticker import PercentFormatter
 from pyspark.sql.functions import pandas_udf
+import scipy.cluster.hierarchy as sch
+from scipy.spatial.distance import squareform
 
 # METADATA ********************
 
@@ -274,16 +276,12 @@ drivers_FE_unpivot.write.format("delta").mode("overwrite").saveAsTable("Sales_Fo
 
 # ### Stage 2: Driver Classification
 # 
-# **Purpose:** Select correct transformations
-# 
-# Decide how each driver should be transformed.
-# Implementation
-# For each driver:
+# **Purpose:** Select idenfity driver behavior
 # 
 # Step 1: Stationarity test
 # 
-# • ADF test or KPSS
-# • Visual check (rolling mean/variance)
+# • ADF test & KPSS
+# 
 # 
 # Step 2: Classify
 # 
@@ -292,20 +290,6 @@ drivers_FE_unpivot.write.format("delta").mode("overwrite").saveAsTable("Sales_Fo
 # 
 # Step 3: Store metadata
 # Create a driver config table:
-# 
-# | Driver | Type | Transformation
-# 
-# 
-# 
-# #### Trending Variables
-# **Examples:** GDP, production, commodities  
-# **Traits:** trend, non-stationary  
-# **Transforms:** YoY, growth rates, differencing  
-# 
-# #### Non-Trending Variables
-# **Examples:** inflation, interest rates, utilization  
-# **Traits:** stable mean, mean-reverting  
-# **Transforms:** usually none (check stationarity)
 
 
 # MARKDOWN ********************
@@ -1243,8 +1227,7 @@ middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecastin
 # ### 4. Feature Selection
 # For each time series w/ all potential driver/feature combinations
 # - Correlation Filtering (Pearson/Spearman) strength threshold/ranking
-# - Multicollinearity / VIF (remove redundant predictors)
-# - Model importance (SHAP / Feature importance), which predictors actually help with forecasting
+# - Feature Cluster filtering 
 # 
 #         input: raw driver data at lag/lead identified, engineered features at lag/lead identified 
 #         output: take the top x features
@@ -1253,9 +1236,6 @@ middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecastin
 
 topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf_base")
 middle_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_ccf_base")
-
-display(topline_ccf.limit(10))
-display(middle_ccf.limit(10))
 
 # METADATA ********************
 
@@ -1272,9 +1252,25 @@ def ccf_filtering(df):
     df = df.withColumn("max_corr", max(col("abs_corr")).over(window))
 
     ## filter out records with a correlations < .3 or Indicator is NaN
-    df_filtered = df.filter((col("max_corr")>.3) & (col("Indicator") != "NaN"))
+    df_filtered = df.filter(
+        (col("max_corr") > 0.3) &
+        (col("max_corr") < .95) &
+        (col("Indicator").isNotNull()) &
+        (col("Indicator") != "NaN")
+    )
 
-    return df_filtered
+    df_ranked = df_filtered.groupBy("series","feature_region","Country","Indicator","Feature").agg(first(col("max_corr")).alias("max_corr"))
+
+    w = Window.partitionBy("series").orderBy(desc("max_corr"))
+
+    df_ranked = df_ranked.withColumn("rank", rank().over(w))
+    df_rank_filtered = df_ranked.filter(col("rank")<=500)
+
+    df_final_filtered = df_rank_filtered.join(df_filtered, ['series','feature_region','Country','Indicator','Feature'], 'inner').drop(df_rank_filtered['max_corr'],df_rank_filtered['rank'])
+
+
+
+    return df_final_filtered
 
 # METADATA ********************
 
@@ -1286,10 +1282,8 @@ def ccf_filtering(df):
 # CELL ********************
 
 topline_ccf_filtered = ccf_filtering(topline_ccf)
-display(topline_ccf_filtered.limit(10))
-
 middle_ccf_filtered = ccf_filtering(middle_ccf)
-display(middle_ccf_filtered.limit(10))
+
 
 # METADATA ********************
 
@@ -1385,104 +1379,89 @@ def corr_clustering(df):
 
 # CELL ********************
 
-def top_20_feature_extraction(df_f_resid, df_ccf_filtered, df_):
-    df_f_resid.select("series","feature_region","Country","Indicator","Feature", "target_date","feature_residual")
+def updated_corr_clustering(df):
 
-# METADATA ********************
+    serie = df['series'][0]
+    pivot_cols = ["series","target_date"]
+    middle_flag = False
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+    if 'target_region' in df.columns:
+        pivot_cols.append("target_region")
+        target_region = df['target_region'][0]
+        middle_flag = True
 
-# CELL ********************
+    wide_df = (
+        df.pivot_table(
+            index=pivot_cols,
+            columns="feature_id",
+            values="feature_residual",
+            aggfunc="first"
+            ).reset_index()
+        )
 
-middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_w_features")
-display(middle_w_features.limit(10))
-topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")
-display(topline_w_features.limit(10))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")\
-    .select("series","feature_region","Country","Indicator","Feature","target_date","feature_residual")
-display(topline_w_features.limit(10))
-
-topline_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf_filtered")
-topline_ccf_filtered = topline_ccf_filtered.withColumn("feature_serie",
-    concat_ws("__","series","feature_region","Country", "Indicator", "Feature"))
-
-series_features = topline_ccf_filtered.select("feature_serie","series","feature_region","Country","Indicator","Feature").distinct()
-
-feature_series = series_features.select("feature_serie").distinct()
-feature_series = feature_series.withColumn("feature_id",row_number().over(Window.orderBy("feature_serie")))
+    
+    
 
 
-topline_ccf_joined = feature_series.join(topline_ccf_filtered, ["feature_serie"], "left")
+    X = wide_df.drop(columns=pivot_cols)
+    X = X.select_dtypes(include=[np.number])
+    X = X.fillna(X.median(numeric_only=True))
 
-display(topline_ccf_joined.limit(5))
+    corr = X.corr().abs()
+    corr = corr.fillna(0)
+    corr = np.clip(corr, 0, 1)
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline_concat = topline_w_features.withColumn("feature_serie",
-    concat_ws("__","series","feature_region","Country", "Indicator", "Feature"))
-
-topline_joined = feature_series.join(topline_concat, ["feature_serie"], "left")
+    ## convert correlation matrix to distance matrix
+    distance = 1 - corr
+    distance = np.clip(distance, 0, 1)
 
 
-display(topline_joined.limit(5))
 
-# METADATA ********************
+    ## hierarchical clustering 
+    condensed_dist = squareform(distance.values, checks=False)
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+    linkage=sch.linkage(condensed_dist, method="average")
 
-# CELL ********************
+    threshold = 0.2
+    cluster_labels = sch.fcluster(linkage,t=threshold, criterion="distance")
+    
+    if middle_flag:
+        cluster_map = pd.DataFrame({
+            "serie": serie,
+            "target_region": target_region,
+            "feature_id": X.columns,
+            "cluster": cluster_labels
+        })
+    else:
+        cluster_map = pd.DataFrame({
+            "serie": serie,
+            "feature_id": X.columns,
+            "cluster": cluster_labels
+        })
 
-topline_wide = topline_joined.groupBy("series","target_date")\
-    .pivot("feature_id").agg(first("feature_residual"))
+    representatives = []
+    for cluster_id in cluster_map["cluster"].unique():
+        features = cluster_map[cluster_map["cluster"] == cluster_id]["feature_id"].tolist()
+        
+        if len(features) == 1:
+            representatives.append(features[0])
+            continue
 
-display(topline_wide.orderBy("series",asc("target_date")).limit(50))
+        sub_corr = corr.loc[features, features]
 
-# METADATA ********************
+        # score = mean correlation to others (higher = more central)
+        scores = sub_corr.mean(axis=1)
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+        rep = scores.idxmax()
+        representatives.append(rep)
 
-# CELL ********************
+    X_reduced = X[representatives]
 
-import pandas as pd
-import numpy as np
+    final_df = pd.concat([df[["target_date"]], X_reduced], axis=1)
 
-import scipy.cluster.hierarchy as sch
-from scipy.spatial.distance import squareform
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
+    return cluster_map
+    
 
 
 # METADATA ********************
@@ -1494,112 +1473,102 @@ from scipy.spatial.distance import squareform
 
 # CELL ********************
 
-test_schema = StructType([
-    StructField("serie", StringType(), False),
-    StructField("feature_id", StringType(), False),
-    StructField("cluster", IntegerType(), False)
-])
-
-topline_clustering = topline_wide.groupBy("series").applyInPandas(corr_clustering, schema=test_schema)
-topline_clustering = topline_clustering.withColumn("feature_id", col("feature_id").cast("int"))
-display(topline_clustering.orderBy('serie','feature_id').limit(20))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-print(topline_ccf.columns)
-print(topline_clustering.columns)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline_ccf_joined = spark.createDataFrame(topline_ccf_joined.rdd, topline_ccf_joined.schema)
-topline_clustering = spark.createDataFrame(topline_clustering.rdd, topline_clustering.schema)
-tj = topline_ccf_joined.alias("tj")
-tc = topline_clustering.alias("tc")
+def top_20_feature_extraction(df_f_resid, df_ccf_filtered):
+    ## creating a key column for feature/serie combinations
+    df_f_resid = df_f_resid.withColumn("feature_serie",
+        concat_ws("__", "series","feature_region","Country","Indicator","Feature"))
 
 
-topline_w_cluster = tj.join(tc, 
-    (tj["feature_id"]==tc["feature_id"]) & (tj['series']==tc['serie']),
-    "inner").drop(tc["feature_id"])
-display(topline_w_cluster.limit(10))
+    df_ccf_filtered = df_ccf_filtered.withColumn("feature_serie",
+        concat_ws("__", "series","feature_region","Country","Indicator","Feature"))
+    
+    ## creating the feature_id for the feature/serie combinations that persisted after filtering
+    feature_series = df_ccf_filtered.select("feature_serie").distinct()
+    feature_series = feature_series.withColumn("feature_id", row_number().over(Window.orderBy("feature_serie")))
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-cluster_corr_w = Window.partitionBy("series", "cluster").orderBy(desc("max_corr"))
-topline_distinct = topline_w_cluster.select("series","feature_id","cluster","max_corr").distinct()
-
-test = topline_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
-display(test.filter(col("series")=="ALU"))
-
-display(test.groupBy("series").agg(
-    countDistinct(col("cluster")).alias("num_clusters"),
-    countDistinct(col("feature_id")).alias("num_features")
-    ))
-display(test.count())
-display(test.filter(col("cluster_rank")<3).count())
-filtered_cluster = test.filter(col("cluster_rank")<3)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-print(filtered_cluster.columns)
-print(topline_ccf_joined.columns)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-## join remaining features w/ original data
-
-#display(topline_ccf_joined.limit(3))
-fc = filtered_cluster.alias("fc")
-tc = topline_ccf_joined.alias("tc")
-
-filtered_post_cluster = fc.join(tc, ["feature_id"], "inner").drop(fc['series'], fc['max_corr'])
-
-#display(filtered_post_cluster)
-
-ranked_f_w = Window.partitionBy("series").orderBy(desc("max_corr"))
-filtered_post_cluster = filtered_post_cluster.withColumn("feature_rank", dense_rank().over(ranked_f_w))
+    ## ensuring there is no ambiguity in the joins
+    r = df_f_resid.alias("r")
 
 
-topline_20_features = filtered_post_cluster.filter(col("feature_rank")<=10)\
-    .select("series","feature_region","Country","Indicator","Feature","Lag","Correlation","abs_corr","max_corr","feature_rank")
-topline_20_features = topline_20_features.withColumn("rec_lag", 
-    when(col("abs_corr")==col("max_corr"),lit(1)).otherwise(lit(0)))
+    initial_joined_df = feature_series.join(df_ccf_filtered, ["feature_serie"], "left")
+    joined_df = initial_joined_df.join(df_f_resid, ['feature_serie'], 'inner')\
+        .drop(r["series"],r["feature_region"],r["Country"],r["Indicator"],r["Feature"],r["feature_serie"])
 
-topline_20_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_20_features")
+
+
+    ## updating logic to create the wide df later within the corr_clustering function
+    middle_process = False
+    if 'target_region' in joined_df.columns:
+        middle_process = True
+
+
+    if middle_process:
+        print("middle process")
+        middle_schema = StructType([
+            StructField("serie", StringType(), False),
+            StructField("target_region", StringType(), False),
+            StructField("feature_id", IntegerType(), False),
+            StructField("cluster", IntegerType(), False)
+        ])
+        clustering = joined_df.groupBy("series","target_region").applyInPandas(updated_corr_clustering, schema=middle_schema)
+
+    else:
+        print("topline_process")
+        topline_schema = StructType([
+            StructField("serie", StringType(), False),
+            StructField("feature_id", IntegerType(), False),
+            StructField("cluster", IntegerType(), False)
+        ])
+
+        clustering = joined_df.groupBy("series").applyInPandas(updated_corr_clustering, schema=topline_schema)
+
+
+
+    ij = initial_joined_df.alias("ij")
+    c = clustering.alias("c")
+
+    if middle_process:
+        data_w_cluster = ij.join(
+            c,
+            (ij['feature_id']==c['feature_id']) & (ij['series']==c['serie']) & (ij['target_region']==c['target_region']),
+            'inner'
+        ).drop(c['feature_id'],c['serie'],c['target_region'])
+
+    else:
+        data_w_cluster = ij.join(
+            c,
+            (ij['feature_id']==c['feature_id']) & (ij['series']==c['serie']),
+            'inner'
+        ).drop(c['feature_id'],c['serie'])
+
+    
+
+    cluster_corr_w = Window.partitionBy("series", "cluster").orderBy(desc("max_corr"))
+
+    data_distinct = data_w_cluster.select("series","feature_id","cluster","max_corr").distinct()
+
+    data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
+
+    data_filtered = data_distinct.filter(col("cluster_rank")<=3)
+
+
+    ## joining remaining features w/ original data
+    df = data_filtered.alias('df')
+
+    post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['series'],df['max_corr'])
+
+    ## ranking series within clusters
+    ranked_w = Window.partitionBy("series").orderBy(desc('max_corr'))
+
+    post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
+
+    top_20_features = post_cluster_filtering.filter(col("feature_rank")<=20).select("series","feature_region","Country","Indicator","Feature","Lag","Correlation","abs_corr","max_corr","feature_rank")
+    top_20_features = top_20_features.withColumn("rec_lag", 
+        when(col("abs_corr")==col("max_corr"),lit(1)).otherwise(lit(0)))
+
+
+    return top_20_features
+
 
 
 # METADATA ********************
@@ -1608,40 +1577,16 @@ topline_20_features.write.format("delta").mode("overwrite").saveAsTable("Sales_F
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
-
-# CELL ********************
-
-display(
-    filtered_post_cluster.orderBy("series","feature_rank")\
-    .select("series","feature_id","cluster","cluster_rank","feature_serie","Lag","max_corr","feature_rank")
-    )
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Testing w/ Middle schema
 
 # CELL ********************
 
 middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_w_features")\
     .select("series","feature_region","Country","Indicator","Feature","target_date","feature_residual")
+topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")\
+    .select("series","feature_region","Country","Indicator","Feature","target_date","feature_residual")
 
-middle_ccf_filtered
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
+middle_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_ccf_filtered")
+topline_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf_filtered")
 
 
 # METADATA ********************
@@ -1653,15 +1598,9 @@ middle_ccf_filtered
 
 # CELL ********************
 
+final_middle_features = top_20_feature_extraction(middle_w_features, middle_ccf_filtered)
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
+final_topline_features = top_20_feature_extraction(topline_w_features, topline_ccf_filtered)
 
 
 # METADATA ********************
@@ -1673,69 +1612,8 @@ middle_ccf_filtered
 
 # CELL ********************
 
-df = topline_wide.toPandas()
-X = df.drop(columns=["target_date","series"])
-X = X.select_dtypes(include=[np.number])
-X = X.fillna(X.median(numeric_only=True))
-
-corr = X.corr().abs()
-corr = corr.fillna(0)
-corr = np.clip(corr, 0, 1)
-
-## convert correlation matrix to distance matrix
-distance = 1 - corr
-distance = np.clip(distance, 0, 1)
-
-
-
-## hierarchical clustering 
-condensed_dist = squareform(distance.values, checks=False)
-
-linkage=sch.linkage(condensed_dist, method="average")
-
-threshold = 0.2
-cluster_labels = sch.fcluster(linkage,t=threshold, criterion="distance")
-
-cluster_map = pd.DataFrame({
-    "feature": X.columns,
-    "cluster": cluster_labels
-})
-
-representatives = []
-for cluster_id in cluster_map["cluster"].unique():
-    features = cluster_map[cluster_map["cluster"] == cluster_id]["feature"].tolist()
-    
-    if len(features) == 1:
-        representatives.append(features[0])
-        continue
-
-    sub_corr = corr.loc[features, features]
-
-    # score = mean correlation to others (higher = more central)
-    scores = sub_corr.mean(axis=1)
-
-    rep = scores.idxmax()
-    representatives.append(rep)
-
-X_reduced = X[representatives]
-
-final_df = pd.concat([df[["target_date"]], X_reduced], axis=1)
-
-display(final_df)
-display(cluster_map.sort_values("cluster"))
-print(representatives)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-print(final_df.shape)
-print(df.shape)
+final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_20_features")
+final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_20_features")
 
 # METADATA ********************
 
@@ -1746,222 +1624,63 @@ print(df.shape)
 
 # MARKDOWN ********************
 
-# ### Reduce feature set based on colinearity 
-
-# CELL ********************
-
-display(feature_series.count())
-filtered_features = feature_series.filter((col("feature_id").isin(representatives)))
-display(filtered_features.count())
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Mapping / Selecting on representative Features
-
-# CELL ********************
-
-df = df[final_df.columns]
-rep_features = spark.createDataFrame(df)
-display(rep_features.limit(5))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-df.columns
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(topline_joined.filter(col("feature_id").isin(rep_features.columns)))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# 
-# 
-# 
-# 
 # ### 5. Complete Economic Validation
 # - validate choices with Dominik for feature selection
-# 
-# ### 5. Save the target time series / feature selection as output
-# 
-# 
+# - Save the target time series / feature selection as output
+
+# CELL ********************
+
+topline_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_20_features")
+topline_feature_selection = topline_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator","Feature"))
+print(topline_feature_selection.columns)
+display(topline_feature_selection.select('series').distinct())
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(topline_feature_selection.filter(col("series")=="ALU"))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_20_features")
+middle_feature_selection = middle_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator","Feature"))
+print(middle_feature_selection.columns)
+display(middle_feature_selection.select('series').distinct().orderBy("series"))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(middle_feature_selection.filter(col("series")=='PISTON___APAC'))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
 # ### 6. Input target time series & top x selected Features into Models & Forecast
-
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Stage 3: Feature Engineering
-# **Purpose:** Create candidate predictors
-# **Features:**
-# - Value (t)
-# - Lags: 1-24
-# - Leads: 1-24
-# - Rolling: mean / median / std (3/6/12M)
-# - Growth: MoM, QoQ, YoY
-# ---
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Stage 4: Cross-Correlation
-# **Purpose:** Identify lead/lag effects
-# **Evaluate:**
-# - Target vs driver level
-# - Target vs lags
-# - Target vs leads
-# **Metrics:**
-# - Pearson correlation (linear)
-# - Cross-correlation function (lead/lag)
-# **Rule:**
-# Prefer stable lag ranges, not single spikes
-# ---
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# 
-# ### Stage 5: Correlation Filtering
-# **Purpose:** Remove weak signals
-# - Keep |corr| > 0.20 or top N
-# - Check stability across windows
-# - Ensure sufficient observations
-# ---
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Stage 6: Multicollinearity
-# **Purpose:** Remove redundant drivers
-# - Drop |corr| > 0.80
-# - VIF > 5–10
-# ---
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Stage 7: Economic Validation
-# **Purpose:** Ensure business logic
-# **Checks:**
-# - Causality plausible
-# - Lag realistic
-# - Interpretable relationship
-# **Example:**
-# ✔ Industrial production → demand  
-# ✖ Random unrelated signal
-# ---
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
 # MARKDOWN ********************
 
