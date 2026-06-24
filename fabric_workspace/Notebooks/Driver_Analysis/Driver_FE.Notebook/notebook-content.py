@@ -613,246 +613,6 @@ driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Fo
 # ##### Transformations - Apply STL in order to only do the correlation analysis upon the residuals
 # ---
 
-# CELL ********************
-
-driver_classification = spark.read.table("Sales_Forecasting.Driver_Exploration.driver_stats")\
-        .drop('adf_stat',
-            'adf_p_value',
-            'adf_stationary_flag',
-            'kpss_stat',
-            'kpss_p_value',
-            'kpss_stationary_flag',)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-drivers_FE_unpivot = spark.read.table("Sales_Forecasting.silver.feature_set")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Driver Bucketing
-
-# MARKDOWN ********************
-
-# ##### Filtering & Bucketing Drivers/Features
-
-# CELL ********************
-
-# ## filter out invalid dataset / features
-# driver_classification = (driver_classification.filter(col("valid_flag")==1)).drop("valid_flag")
-
-# ## bucket stationary drivers
-# stationary_drivers = driver_classification.filter(col("stationary_class")=="Stationary_use_levels")
-
-# ## bucket for drivers that require detrend transformations
-# detrend_drivers = driver_classification.filter(col("stationary_class")=="Detrend")
-
-# ## bucket for drivers that require log diff transformations
-# log_diff_drivers = driver_classification.filter(col("stationary_class")=="Log_diff")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ##### Joining filtered labels w/ the feature values
-
-# CELL ********************
-
-# ## join stationary flagged features with their values
-# stationary_feature_set = (
-#     broadcast(stationary_drivers).join(
-#         drivers_FE_unpivot, 
-#         ["Country","Indicator","Region","Feature"],
-#          "left")
-# ).drop("stationary_class")
-
-
-# ## Join detrend features w/ their values
-# detrend_feature_set = (
-#     broadcast(detrend_drivers).join(
-#         drivers_FE_unpivot,
-#         ["Country","Indicator","Region","Feature"],
-#         "left"
-#     )
-# ).drop("stationary_class")
-
-
-# ## join log diff featues w/ their values
-# log_diff_feature_set = (
-#     broadcast(log_diff_drivers).join(
-#         drivers_FE_unpivot,
-#         ["Country", "Indicator", "Region", "Feature"],
-#         "left"
-#     )
-# ).drop("stationary_class")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ### Time Series Bucketing
-
-# CELL ********************
-
-# topline_cutoff_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data")
-# middle_cutoff_data = spark.read.table("Sales_Forecasting.silver.middle_cutoff_data")
-# ts_stationary_stats = spark.read.table("Sales_Forecasting.Data_Exploration.stationary_stats")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# # aligning final stationarity flag w/ the transformation options / workflows
-# ts_stationary_stats = ts_stationary_stats.withColumn(
-#     "Final_Stationarity_Flag",
-#     when(
-#         (col("ADF_P_Value") < 0.05) &
-#         (col("PP_P_Value") < 0.05) &
-#         (col("KPSS_P_Value") > 0.05),
-#         "Stationary_use_levels"
-#     )
-#     .when(
-#         (col("ADF_P_Value") < 0.05) &
-#         (col("PP_P_Value") < 0.05) &
-#         (col("KPSS_P_Value") <= 0.05),
-#         "Detrend"
-#     )
-#     .when(
-#         (col("ADF_P_Value") >= 0.05) &
-#         (col("PP_P_Value") >= 0.05) &
-#         (col("KPSS_P_Value") <= 0.05),
-#         "Log_diff"
-#     )
-#     .otherwise(
-#         "Detrend"
-#     )
-# ).withColumnRenamed("Series","series")\
-# .drop('ADF_Statistic',
-#     'ADF_P_Value',
-#     'ADF_Stationarity_Flag',
-#     'KPSS_Statistic',
-#     'KPSS_P_Value',
-#     'KPSS_Stationarity_Flag',
-#     'N_Obs',
-#     'PP_Statistic',
-#     'PP_P_Value',
-#     'PP_Stationarity_Flag')
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ##### Bucketing topline and middle sales data
-
-# CELL ********************
-
-# ## Buckets 
-#     # Stationary TS
-#     # Detrend TS
-#     # Log Diff TS
-
-
-# ## TOPLINE DATA
-
-# ## Stationary Bucket
-# topline_stationary = broadcast(
-#     ts_stationary_stats.filter(col("Final_Stationarity_Flag")=="Stationary_use_levels")
-#     ).join(
-#     topline_cutoff_data, ["series"], "inner"
-# ).drop("Final_Stationarity_Flag","Product_Category")
-
-
-# ## Detrend Bucket
-# topline_detrend = broadcast(
-#     ts_stationary_stats.filter(col("Final_Stationarity_Flag")=="Detrend")
-# ).join(
-#     topline_cutoff_data, ["series"], "inner"
-# ).drop("Final_Stationarity_Flag", "Product_Category")
-
-
-# ## Log Diff Bucket
-# topline_log_diff = broadcast(
-#     ts_stationary_stats.filter(col("Final_Stationarity_Flag")=="Log_dff")
-# ).join(
-#     topline_cutoff_data, ["series"], "inner"
-# ).drop("Final_Stationarity_Flag","Product_Category")
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# ## MIDDLE DATA
-
-# ## Stationary Bucket
-# middle_stationary = broadcast(
-#     ts_stationary_stats.filter(col("Final_Stationarity_Flag")=="Stationary_use_levels")
-#     ).join(
-#     middle_cutoff_data, ["series"], "inner"
-# ).drop("Final_Stationarity_Flag","Product_Category","Region")
-
-
-# ## Detrend Bucket
-# middle_detrend = broadcast(
-#     ts_stationary_stats.filter(col("Final_Stationarity_Flag")=="Detrend")
-# ).join(
-#     middle_cutoff_data, ["series"], "inner"
-# ).drop("Final_Stationarity_Flag", "Product_Category","Region")
-
-
-# ## Log Diff Bucket
-# middle_log_diff = broadcast(
-#     ts_stationary_stats.filter(col("Final_Stationarity_Flag")=="Log_diff")
-# ).join(
-#     middle_cutoff_data, ["series"], "inner"
-# ).drop("Final_Stationarity_Flag","Product_Category","Region")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
 # ## Apply STL to all drivers and series before CCF analysis
@@ -1075,6 +835,7 @@ middle_pairs.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecast
 
 ## Creating Expanded versions of the middle & topline residuals based on the pair mappings
     ## both approaches for managing schema/column explosion during join work
+    
 expanded_topline = topline_residuals.join(
     broadcast(topline_pairs),
     #topline_residuals["series"]==topline_pairs["series"],
@@ -1180,6 +941,17 @@ expanded_middle = spark.read.table("Sales_Forecasting.Driver_Exploration.expande
 
 # CELL ********************
 
+display(spark.read.table("Sales_Forecasting.Driver_Exploration.expanded_t_features").limit(10))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 expanded_topline = spark.createDataFrame(expanded_topline.rdd, expanded_topline.schema)
 expanded_middle = spark.createDataFrame(expanded_middle.rdd, expanded_middle.schema)
 
@@ -1245,17 +1017,6 @@ middle_final = m.join(
     "left"
 ).select(m["series"],m["Product_Category"],m["middle_region"],m["target_date"],m["target_residual"],
         mf["feature_region"],mf["Indicator"],mf["Feature"],mf["Country"],mf["feature_residual"])
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(middle_final.limit(5))
 
 # METADATA ********************
 
@@ -1491,6 +1252,10 @@ middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecastin
 # CELL ********************
 
 topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf_base")
+middle_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_ccf_base")
+
+display(topline_ccf.limit(10))
+display(middle_ccf.limit(10))
 
 # METADATA ********************
 
@@ -1501,20 +1266,30 @@ topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_ccf
 
 # CELL ********************
 
-topline_w = Window.partitionBy("series","feature_region","Country","Indicator","Feature")
-topline_ccf = topline_ccf.withColumn("abs_corr", abs(col("Correlation")))
-topline_ccf = topline_ccf.withColumn("max_corr", max(col("abs_corr")).over(topline_w))
+def ccf_filtering(df):
+    window = Window.partitionBy("series","feature_region","Country","Indicator","Feature")
+    df = df.withColumn("abs_corr", abs(col("Correlation")))
+    df = df.withColumn("max_corr", max(col("abs_corr")).over(window))
 
-## filter out records where there isn't a lag/lead with a correlation > .3 or where Indicator is NaN
+    ## filter out records with a correlations < .3 or Indicator is NaN
+    df_filtered = df.filter((col("max_corr")>.3) & (col("Indicator") != "NaN"))
 
-topline_ccf_filtered = topline_ccf.filter((col("max_corr")>.3) & (col("Indicator") != "NaN"))
+    return df_filtered
 
-display(topline_ccf_filtered.agg((count("*")/49).alias("num_Ind")))
-display(topline_ccf_filtered
-    .groupBy(round(col("max_corr"),2).alias("max_corr"))
-    .agg((count("*")/49).alias("count_Ind"))
-    .orderBy(desc(col("max_corr"))))
+# METADATA ********************
 
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_ccf_filtered = ccf_filtering(topline_ccf)
+display(topline_ccf_filtered.limit(10))
+
+middle_ccf_filtered = ccf_filtering(middle_ccf)
+display(middle_ccf_filtered.limit(10))
 
 # METADATA ********************
 
@@ -1526,64 +1301,7 @@ display(topline_ccf_filtered
 # CELL ********************
 
 topline_ccf_filtered.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.topline_ccf_filtered") 
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# ## VIF application
-# - requires residuals of drivers not the correlation values
-
-# CELL ********************
-
-# def VIF_compute(pdf):
-#     pdf = pdf.sort_values("target_date")
-#     X = pdf.drop(columns=["target_date"])
-
-#     # clean data (IMPORTANT)
-#     X = X.replace([np.inf, -np.inf], np.nan)
-#     X = X.dropna()
-
-#     # remove constant columns (VERY IMPORTANT for VIF stability)
-#     X = X.loc[:, X.nunique() > 1]
-
-#     # ensure numeric only
-#     X = X.select_dtypes(include=[np.number])
-
-#     # handle missing values
-#     X = X.fillna(X.median(numeric_only=True))
-
-
-#     vif = pd.DataFrame()
-#     vif["feature_id"] = X.columns
-#     vif["VIF"] = [
-#         variance_inflation_factor(X.values, i)
-#         for i in range(X.shape[1])
-#     ]
-
-#     return vif
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# test_schema = (StructType([
-#     StructField("feature_id", StringType(), True),
-#     StructField("VIF", DoubleType(), True)
-# ]))
-# test = topline_wide.groupBy("target_date").applyInPandas(VIF_compute, schema=test_schema)
-
-# display(test)
+middle_ccf_filtered.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration.middle_ccf_filtered")
 
 # METADATA ********************
 
@@ -1668,7 +1386,7 @@ def corr_clustering(df):
 # CELL ********************
 
 def top_20_feature_extraction(df_f_resid, df_ccf_filtered, df_):
-    df_f_resid.select("series","feature_region",)
+    df_f_resid.select("series","feature_region","Country","Indicator","Feature", "target_date","feature_residual")
 
 # METADATA ********************
 
@@ -1679,10 +1397,10 @@ def top_20_feature_extraction(df_f_resid, df_ccf_filtered, df_):
 
 # CELL ********************
 
-middle_w_features = spark.read.table("Sales_Forecastaing.Driver_Exploration.middle_w_features")
+middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_w_features")
 display(middle_w_features.limit(10))
 topline_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.topline_w_features")
-display(topline_w_features)
+display(topline_w_features.limit(10))
 
 # METADATA ********************
 
@@ -1905,8 +1623,16 @@ display(
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# ### Testing w/ Middle schema
+
 # CELL ********************
 
+middle_w_features = spark.read.table("Sales_Forecasting.Driver_Exploration.middle_w_features")\
+    .select("series","feature_region","Country","Indicator","Feature","target_date","feature_residual")
+
+middle_ccf_filtered
 
 # METADATA ********************
 
