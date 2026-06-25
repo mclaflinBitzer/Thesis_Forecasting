@@ -58,6 +58,10 @@ from scipy.spatial.distance import squareform
 
 compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
 
+aggregated_feature_set = compiled_drivers.groupBy("Region","Indicator","Date").agg(sum("Value").alias("Value"))
+aggregated_feature_set = aggregated_feature_set.withColumn("Country", col("Region"))
+compiled_drivers = compiled_drivers.unionByName(aggregated_feature_set)
+
 # METADATA ********************
 
 # META {
@@ -344,6 +348,20 @@ middle_cutoff_data = spark.read.table("Sales_Forecasting.silver.middle_cutoff_da
 
 # CELL ********************
 
+## aggregate by Region & Indicator & Date
+aggregated_feature_set = feature_set.groupBy("Region","Indicator","Date").agg(sum("Value").alias("Value"))
+aggregated_feature_set = aggregated_feature_set.withColumn("Country", col("Region"))
+feature_set = feature_set.unionByName(aggregated_feature_set)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 driver_classification = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.driver_stats")\
         .drop('adf_stat',
             'adf_p_value',
@@ -445,21 +463,9 @@ feature_set_residuals = feature_set_valid.groupBy("Country","Indicator", "Region
 
 # MARKDOWN ********************
 
-# # Stage 3: Lag/Lead Identification of Features
 # #### Application of CCF
 # 
 # #### Joining target / drivers prior to CCF calculation
-
-# CELL ********************
-
-middle_residuals.columns
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
 # CELL ********************
 
@@ -497,7 +503,9 @@ topline_distinct = topline_residuals.select("series").distinct()
 middle_distinct = middle_residuals.select("series","target_region").distinct()
 
 feature_world_distinct = feature_set_residuals.filter(col("feature_region")=="World").select("feature_region","Country","Indicator").distinct()
-feature_m_distinct = feature_set_residuals.filter(~(col("feature_region")=="World"))\
+
+## Update to filter where Country=Region as well to make sure only to keep the aggregated versions of drivers for middle
+feature_m_distinct = feature_set_residuals.filter((~(col("feature_region")=="World")) & (col("feature_region")==col("Country")))\
     .select("feature_region","Country","Indicator").distinct()
 
 
@@ -1052,7 +1060,7 @@ def corr_clustering(df):
 
 # CELL ********************
 
-def top_20_feature_extraction(df_f_resid, df_ccf_filtered):
+def top_x_feature_extraction(df_f_resid, df_ccf_filtered, num_features):
     ## creating a key column for feature/serie combinations
     df_f_resid = df_f_resid.withColumn("feature_serie",
         concat_ws("__", "series","feature_region","Country","Indicator"))
@@ -1137,16 +1145,30 @@ def top_20_feature_extraction(df_f_resid, df_ccf_filtered):
     post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['series'],df['max_corr'])
 
     ## ranking series within clusters
-    ranked_w = Window.partitionBy("series").orderBy(desc('max_corr'))
+    ranked_w = Window. partitionBy("series").orderBy(desc('max_corr'))
 
     post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
 
-    top_20_features = post_cluster_filtering.filter(col("feature_rank")<=20).select("series","feature_region","Country","Indicator","Lag","Correlation","abs_corr","max_corr","feature_rank")
-    top_20_features = top_20_features.withColumn("rec_lag", 
+    top_x_features = post_cluster_filtering.filter(col("feature_rank")<=num_features).select("series","feature_region","Country","Indicator","Lag","Correlation","abs_corr","max_corr","feature_rank")
+    top_x_features = top_x_features.withColumn("rec_lag", 
         when(col("abs_corr")==col("max_corr"),lit(1)).otherwise(lit(0)))
 
 
-    return top_20_features
+    top_x_features = top_x_features
+    w = Window.partitionBy("series","feature_region","Indicator").orderBy("Lag").rowsBetween(-1,1)
+    top_x_features = top_x_features\
+        .withColumn('rolling_corr_avg', mean(col("Correlation")).over(w))\
+        .withColumn('rolling_corr_std', stddev(col("Correlation")).over(w))\
+        .withColumn("stable_flag",
+            when(
+                (col("Correlation") >= col("rolling_corr_avg") - col("rolling_corr_std")) &
+                (col("Correlation") <= col("rolling_corr_avg") + col("rolling_corr_std")),
+                lit(1)
+            ).otherwise(lit(0))
+            )
+
+
+    return top_x_features
 
 
 
@@ -1177,22 +1199,10 @@ topline_ccf_filtered = spark.read.table("Sales_Forecasting.Driver_Exploration_V2
 
 # CELL ********************
 
-final_middle_features = top_20_feature_extraction(middle_w_features, middle_ccf_filtered)
+final_middle_features = top_x_feature_extraction(middle_w_features, middle_ccf_filtered,30)
 
-final_topline_features = top_20_feature_extraction(topline_w_features, topline_ccf_filtered)
+final_topline_features = top_x_feature_extraction(topline_w_features, topline_ccf_filtered,30)
 
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_20_features")
-final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_20_features")
 
 # METADATA ********************
 
@@ -1203,6 +1213,37 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 
 # CELL ********************
 
+final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_top_features")
+final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_top_features")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print(final_topline_features.columns)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_f = final_topline_features.orderBy("series","feature_region","feature_rank","Lag").toPandas()
+middle_f = final_middle_features.orderBy("series","feature_region","feature_rank","Lag").toPandas()
+
+output_path = "/lakehouse/default/Files/Driver_Analysis/feature_analysis.xlsx"
+with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+    topline_f.to_excel(writer, sheet_name="Topline_Features", index=False)
+    middle_f.to_excel(writer, sheet_name="Middle_Featuers", index=False)
+    print(f"saved to {output_path}")
 
 # METADATA ********************
 
@@ -1219,7 +1260,7 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 
 # CELL ********************
 
-topline_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_20_features")
+topline_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_top_features")
 topline_feature_selection = topline_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator"))
 print(topline_feature_selection.columns)
 display(topline_feature_selection.select('series').distinct())
@@ -1233,7 +1274,7 @@ display(topline_feature_selection.select('series').distinct())
 
 # CELL ********************
 
-display(topline_feature_selection.filter(col("series")=="ALU"))
+display(topline_feature_selection.filter(col("series")=="SCREWS").select("Indicator").distinct())
 
 # METADATA ********************
 
@@ -1244,7 +1285,18 @@ display(topline_feature_selection.filter(col("series")=="ALU"))
 
 # CELL ********************
 
-middle_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_20_features")
+display(topline_feature_selection.filter(col("series")=="SCREWS"))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+middle_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_top_features")
 middle_feature_selection = middle_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator"))
 print(middle_feature_selection.columns)
 display(middle_feature_selection.select('series').distinct().orderBy("series"))
