@@ -116,30 +116,23 @@ df_grouped = (
 
 # CELL ********************
 
-# create "world" grouping
-world_df = df_grouped.groupby(["Indicator","Date"], as_index=False)["Value"].sum()
+## removing as this has caused issues with aggregation 
 
-world_df["Country"] = "World"
-world_df = world_df[["Country","Indicator","Date","Value"]]
+# # create "world" grouping
+# world_df = df_grouped.groupby(["Indicator","Date"], as_index=False)["Value"].sum()
 
-# METADATA ********************
+# world_df["Country"] = "World"
+# # world_df = world_df[["Country","Indicator","Date","Value"]]
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 # -----------------------------------------------------------------------------
 # APPEND / CONCATENATE
 # -----------------------------------------------------------------------------
 
-final_df = pd.concat(
-    [df_grouped, world_df],
-    ignore_index=True
-)
-
+# final_df = pd.concat(
+#     [df_grouped, world_df],
+#     ignore_index=True
+# )
 
 
 # METADATA ********************
@@ -168,6 +161,7 @@ spark_schema = StructType([
 # CELL ********************
 
 ## Convert to spark dataframe
+final_df = df_grouped
 spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # METADATA ********************

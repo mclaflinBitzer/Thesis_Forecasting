@@ -170,33 +170,26 @@ df_grouped = df_grouped[
 
 # CELL ********************
 
-## create world grouping
-df_world = df_grouped.groupby(["Date"],as_index=False)["Value"].sum()
-df_world["Country"] = "World"
-df_world["Indicator"] = "HVAC"
+## Removing as it is breaking logic downstream
 
-df_world = df_world[["Country", "Indicator", "Date", "Value"]]
+# # ## create world grouping
+# # df_world = df_grouped.groupby(["Date"],as_index=False)["Value"].sum()
+# # df_world["Country"] = "World"
+# # df_world["Indicator"] = "HVAC"
 
-# METADATA ********************
+# # df_world = df_world[["Country", "Indicator", "Date", "Value"]]
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# # -----------------------------------------------------------------------------
+# # APPEND WORLD DATAFRAME
+# # Assumes HVAC_GD_World already exists
+# # -----------------------------------------------------------------------------
 
-# CELL ********************
+# final_df = pd.concat(
+#     [df_grouped, df_world],
+#     ignore_index=True
+# )
 
-# -----------------------------------------------------------------------------
-# APPEND WORLD DATAFRAME
-# Assumes HVAC_GD_World already exists
-# -----------------------------------------------------------------------------
-
-final_df = pd.concat(
-    [df_grouped, df_world],
-    ignore_index=True
-)
-
-final_df.head()
+# final_df.head()
 
 # METADATA ********************
 
@@ -223,6 +216,7 @@ spark_schema = StructType([
 
 # CELL ********************
 
+final_df = df_grouped
 spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # METADATA ********************
@@ -234,6 +228,7 @@ spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # CELL ********************
 
+from pyspark.sql.functions import col
 driver_time_bounds = (
                         spark_df
                                 .filter(col("Value").isNotNull() & ~isnan(col("Value")))
@@ -276,16 +271,6 @@ filled_df = df_full.withColumn(
 # CELL ********************
 
 filled_df.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.bronze.DRV_HVAC")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 

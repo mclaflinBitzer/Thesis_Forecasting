@@ -175,33 +175,23 @@ df_unpivot.head()
 
 # CELL ********************
 
-df_world = df_unpivot.groupby(["Indicator", "Indicator_Code", "Date"], as_index=False)["Value"].sum()
-df_world["Country"] = "World"
+# df_world = df_unpivot.groupby(["Indicator", "Indicator_Code", "Date"], as_index=False)["Value"].sum()
+# df_world["Country"] = "World"
 
-df_world = df_world[["Country", "Indicator", "Indicator_Code", "Date", "Value"]]
+# df_world = df_world[["Country", "Indicator", "Indicator_Code", "Date", "Value"]]
 
-df_world.head()
+# df_world.head()
+# # -----------------------------------------------------------------------------
+# # APPEND OXFORD WORLD DATA
+# # -----------------------------------------------------------------------------
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# -----------------------------------------------------------------------------
-# APPEND OXFORD WORLD DATA
-# -----------------------------------------------------------------------------
-
-final_df = pd.concat(
-    [df_unpivot, df_world],
-    ignore_index=True
-)
+# final_df = pd.concat(
+#     [df_unpivot, df_world],
+#     ignore_index=True
+# )
 
 
-final_df.head()
+# final_df.head()
 
 # METADATA ********************
 
@@ -229,6 +219,7 @@ spark_schema = StructType([
 
 # CELL ********************
 
+final_df = df_unpivot
 spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 

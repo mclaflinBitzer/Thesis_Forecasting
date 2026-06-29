@@ -170,22 +170,22 @@ df_unpivot.head(10)
 
 # CELL ********************
 
-## Creating "world" grouping
-df_world = df_unpivot.groupby(["Indicator","Date"], as_index=False)["Value"].sum()
+# ## Creating "world" grouping
+# df_world = df_unpivot.groupby(["Indicator","Date"], as_index=False)["Value"].sum()
 
-df_world["Country"] = "World"
-df_world = df_world[["Country","Indicator","Date","Value"]]
+# df_world["Country"] = "World"
+# df_world = df_world[["Country","Indicator","Date","Value"]]
 
 
-# -----------------------------------------------------------------------------
-# APPEND EXISTING WORLD DATAFRAME
-# Assumes Project_GD_World already exists
-# -----------------------------------------------------------------------------
+# # -----------------------------------------------------------------------------
+# # APPEND EXISTING WORLD DATAFRAME
+# # Assumes Project_GD_World already exists
+# # -----------------------------------------------------------------------------
 
-final_df = pd.concat(
-    [df_unpivot, df_world],
-    ignore_index=True
-)
+# final_df = pd.concat(
+#     [df_unpivot, df_world],
+#     ignore_index=True
+# )
 
 # METADATA ********************
 
@@ -204,6 +204,7 @@ spark_schema = StructType([
     StructField("Value", DoubleType(), True)
 ])
 
+final_df = df_unpivot
 spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # METADATA ********************
@@ -215,6 +216,7 @@ spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # CELL ********************
 
+from pyspark.sql.functions import *
 driver_time_bounds = (
                         spark_df
                                 .filter(col("Value").isNotNull() & ~isnan(col("Value")))

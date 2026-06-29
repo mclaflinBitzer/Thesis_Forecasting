@@ -36,7 +36,7 @@ import numpy as np
 from statsmodels.tsa.seasonal import STL
 from statsmodels.tsa.stattools import ccf 
 import statsmodels.api as sm
-from statsmodels.tsa.stattools import kpss
+from statsmodels.tsa.stattools import kpss as kpss_test
 from matplotlib.ticker import MaxNLocator, AutoMinorLocator
 from matplotlib.ticker import PercentFormatter
 from pyspark.sql.functions import pandas_udf
@@ -58,10 +58,6 @@ from scipy.spatial.distance import squareform
 
 compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
 
-aggregated_feature_set = compiled_drivers.groupBy("Region","Indicator","Date").agg(sum("Value").alias("Value"))
-aggregated_feature_set = aggregated_feature_set.withColumn("Country", col("Region"))
-compiled_drivers = compiled_drivers.unionByName(aggregated_feature_set)
-
 # METADATA ********************
 
 # META {
@@ -71,12 +67,13 @@ compiled_drivers = compiled_drivers.unionByName(aggregated_feature_set)
 
 # CELL ********************
 
-def adf_group(df):
+def adf(df):
+
     pdf = df.sort_values("Date")
 
-    country = pdf["Country"].iloc[0]
-    indicator = pdf["Indicator"].iloc[0]
-    region = pdf["Region"].iloc[0]
+    # ALWAYS include group keys
+    grp_cols = [c for c in pdf.columns if c not in ['Date','Value']]
+    result = {c: pdf[c].iloc[0] for c in grp_cols}
 
     ts = (
         pd.to_numeric(pdf["Value"], errors="coerce")
@@ -85,53 +82,50 @@ def adf_group(df):
         .values
     )
 
-
+    # -------------------------
+    # insufficient data
+    # -------------------------
     if len(ts) < 12:
-        return pd.DataFrame([{
-            "Country": country,
-            "Indicator": indicator,
-            "Region": region,
+        result.update({
             "adf_stat": None,
             "adf_p_value": None,
-            "adf_stationary_flag": "Insufficient Data"            
-        }])
-    
+            "adf_stationary_flag": "Insufficient Data"
+        })
+        return pd.DataFrame([result])
+
+    # -------------------------
+    # constant series
+    # -------------------------
     if np.nanstd(ts) == 0:
-        return pd.DataFrame([{
-            "Country": country,
-            "Indicator": indicator,
-            "Region": region,
+        result.update({
             "adf_stat": None,
             "adf_p_value": None,
             "adf_stationary_flag": "Constant Series (Skipped)"
-        }])
+        })
+        return pd.DataFrame([result])
 
-
-    ## ADF execution
+    # -------------------------
+    # ADF test
+    # -------------------------
     try:
         adf_stat, p_value, *_ = adfuller(ts)
 
-        return pd.DataFrame([{
-            "Country": country,
-            "Indicator": indicator,
-            "Region": region,
+        result.update({
             "adf_stat": adf_stat,
             "adf_p_value": p_value,
             "adf_stationary_flag": (
-                "Stationary" if p_value < 0.05
-                else "Non Stationary"
+                "Stationary" if p_value < 0.05 else "Non Stationary"
             )
-        }])
+        })
 
     except Exception as e:
-        return pd.DataFrame([{
-            "Country": country,
-            "Indicator": indicator,
-            "Region": region,
+        result.update({
             "adf_stat": None,
             "adf_p_value": None,
             "adf_stationary_flag": f"ADF Failed: {str(e)}"
-        }])
+        })
+
+    return pd.DataFrame([result])
 
 # METADATA ********************
 
@@ -142,19 +136,142 @@ def adf_group(df):
 
 # CELL ********************
 
-adf_schema = StructType([
-    StructField("Country", StringType(), False),
-    StructField("Indicator", StringType(), False),
-    StructField("Region", StringType(), False),
-    StructField("adf_stat", DoubleType(), True),
-    StructField("adf_p_value", DoubleType(), True),
-    StructField("adf_stationary_flag", StringType(), True)
-])
-
-adf_results = (compiled_drivers
-                    .groupBy("Country","Indicator","Region")
-                    .applyInPandas(adf_group, schema=adf_schema)
+T_DRV_GRP_COLS = ['Indicator']
+T_adf_schema = StructType(
+    [StructField(c, StringType(), False) for c in T_DRV_GRP_COLS] +
+    [
+        StructField("adf_stat", DoubleType(), True),
+        StructField("adf_p_value", DoubleType(), True),
+        StructField("adf_stationary_flag", StringType(), True)
+    ]
 )
+
+T_drivers = compiled_drivers.groupBy(*T_DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
+T_adf_results = T_drivers.groupBy(*T_DRV_GRP_COLS).applyInPandas(adf, T_adf_schema)
+
+
+
+M_DRV_GRP_COLS = ['Region','Indicator']
+M_adf_schema = StructType(
+    [StructField(c, StringType(), False) for c in M_DRV_GRP_COLS] +
+    [
+        StructField("adf_stat", DoubleType(), True),
+        StructField("adf_p_value", DoubleType(), True),
+        StructField("adf_stationary_flag", StringType(), True)       
+    ]
+)
+
+M_drivers = compiled_drivers.groupBy(*M_DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
+M_adf_results = M_drivers.groupBy(*M_DRV_GRP_COLS).applyInPandas(adf, M_adf_schema)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(T_adf_results.groupBy('adf_stationary_flag').count())
+display(M_adf_results.groupBy('adf_stationary_flag').count())
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# def adf_group(df):
+#     pdf = df.sort_values("Date")
+
+#     country = pdf["Country"].iloc[0]
+#     indicator = pdf["Indicator"].iloc[0]
+#     region = pdf["Region"].iloc[0]
+
+#     ts = (
+#         pd.to_numeric(pdf["Value"], errors="coerce")
+#         .replace([np.inf, -np.inf], np.nan)
+#         .dropna()
+#         .values
+#     )
+
+
+#     if len(ts) < 12:
+#         return pd.DataFrame([{
+#             "Country": country,
+#             "Indicator": indicator,
+#             "Region": region,
+#             "adf_stat": None,
+#             "adf_p_value": None,
+#             "adf_stationary_flag": "Insufficient Data"            
+#         }])
+    
+#     if np.nanstd(ts) == 0:
+#         return pd.DataFrame([{
+#             "Country": country,
+#             "Indicator": indicator,
+#             "Region": region,
+#             "adf_stat": None,
+#             "adf_p_value": None,
+#             "adf_stationary_flag": "Constant Series (Skipped)"
+#         }])
+
+
+#     ## ADF execution
+#     try:
+#         adf_stat, p_value, *_ = adfuller(ts)
+
+#         return pd.DataFrame([{
+#             "Country": country,
+#             "Indicator": indicator,
+#             "Region": region,
+#             "adf_stat": adf_stat,
+#             "adf_p_value": p_value,
+#             "adf_stationary_flag": (
+#                 "Stationary" if p_value < 0.05
+#                 else "Non Stationary"
+#             )
+#         }])
+
+#     except Exception as e:
+#         return pd.DataFrame([{
+#             "Country": country,
+#             "Indicator": indicator,
+#             "Region": region,
+#             "adf_stat": None,
+#             "adf_p_value": None,
+#             "adf_stationary_flag": f"ADF Failed: {str(e)}"
+#         }])
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# adf_topline_schema = StructType([
+#     StructField("Country", StringType(), False),
+#     StructField("Indicator", StringType(), False),
+#     StructField("Region", StringType(), False),
+#     StructField("adf_stat", DoubleType(), True),
+#     StructField("adf_p_value", DoubleType(), True),
+#     StructField("adf_stationary_flag", StringType(), True)
+# ])
+
+# adf_topline_results = (compiled_drivers
+#                     .groupBy("Country","Indicator","Region")
+#                     .applyInPandas(adf_group, schema=adf_schema)
+# )
+
+
+# adf_
 
 # METADATA ********************
 
@@ -169,12 +286,13 @@ adf_results = (compiled_drivers
 
 # CELL ********************
 
-def kpss_group(df):
-    pdf = df.sort_values("Date")
+def kpss(df):
+    pdf = df.sort_values('Date')
 
-    country = pdf["Country"].iloc[0]
-    indicator = pdf["Indicator"].iloc[0]
-    region = pdf["Region"].iloc[0]
+    # ALWAYS include group keys
+    grp_cols = [c for c in pdf.columns if c not in ['Date','Value']]
+    result = {c: pdf[c].iloc[0] for c in grp_cols}
+
 
     # FORCE CLEAN NUMERIC PIPELINE
     ts = (
@@ -184,58 +302,175 @@ def kpss_group(df):
         .values
     )
 
-
+    
     if len(ts) < 12:
-        return pd.DataFrame([{
-            "Country": country,
-            "Indicator": indicator,
-            "Region": region,
+        result.update({
             "kpss_stat": None,
             "kpss_p_value": None,
             "kpss_stationary_flag": "Insufficient Data (<12 obs)"
-        }])
+        })
+        return pd.DataFrame([result])
     
     # SAFETY CHECK 2: constant series
     if np.nanstd(ts) == 0:
-        return pd.DataFrame([{
-            "Country": country,
-            "Indicator": indicator,
-            "Region": region,
+        result.update({
             "kpss_stat": None,
             "kpss_p_value": None,
             "kpss_stationary_flag": "Constant Series (Skipped)"
-        }])
+        })
+        return pd.DataFrame([result])
 
         
     ## Run KPSS
     try:
-        kpss_stat, p_value, _, _ = kpss(
-            ts,
-            regression="c",
-            nlags="auto"
-        )
+        kpss_stat, p_value, _, _ = kpss_test(
+            ts)
 
-        return pd.DataFrame([{
-                "Country": country,
-                "Indicator": indicator,
-                "Region": region,
+        result.update({
                 "kpss_stat": kpss_stat,
                 "kpss_p_value": p_value,
                 "kpss_stationary_flag": 
                     "Stationary" if p_value >= 0.05
                     else "Non-Stationary"
-        }])
+        })
+        return pd.DataFrame([result])
 
 
     except Exception as e:
-        return pd.DataFrame([{
-                "Country": country,
-                "Indicator": indicator,
-                "Region": region,
+        result.update({
                 "kpss_stat": None,
                 "kpss_p_value": None,
                 "kpss_stationary_flag": f"KPSS Failed: {str(e)}"
-        }])
+        })
+        return pd.DataFrame([result])
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+T_kpss_schema = StructType(
+    [StructField(c, StringType(), False) for c in T_DRV_GRP_COLS] +
+    [
+        StructField("kpss_stat", DoubleType(), True),
+        StructField("kpss_p_value", DoubleType(), True),
+        StructField("kpss_stationary_flag", StringType(), False)
+    ]
+)
+
+
+T_kpss_results = T_drivers.groupBy(*T_DRV_GRP_COLS)\
+                    .applyInPandas(kpss, schema=T_kpss_schema)
+
+
+M_kpss_schema = StructType(
+    [StructField(c, StringType(), False) for c in M_DRV_GRP_COLS] +
+    [
+        StructField("kpss_stat", DoubleType(), True),
+        StructField("kpss_p_value", DoubleType(), True),
+        StructField("kpss_stationary_flag", StringType(), False)
+    ]
+)
+
+M_kpss_results = M_drivers.groupBy(*M_DRV_GRP_COLS)\
+                    .applyInPandas(kpss, schema=M_kpss_schema)
+
+        
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(T_kpss_results.groupBy('kpss_stationary_flag').count())
+display(M_kpss_results.groupBy('kpss_stationary_flag').count())
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# def kpss_group(df):
+#     pdf = df.sort_values("Date")
+
+#     country = pdf["Country"].iloc[0]
+#     indicator = pdf["Indicator"].iloc[0]
+#     region = pdf["Region"].iloc[0]
+
+#     # FORCE CLEAN NUMERIC PIPELINE
+#     ts = (
+#         pd.to_numeric(pdf["Value"], errors="coerce")
+#         .replace([np.inf, -np.inf], np.nan)
+#         .dropna()
+#         .values
+#     )
+
+
+#     if len(ts) < 12:
+#         return pd.DataFrame([{
+#             "Country": country,
+#             "Indicator": indicator,
+#             "Region": region,
+#             "kpss_stat": None,
+#             "kpss_p_value": None,
+#             "kpss_stationary_flag": "Insufficient Data (<12 obs)"
+#         }])
+    
+#     # SAFETY CHECK 2: constant series
+#     if np.nanstd(ts) == 0:
+#         return pd.DataFrame([{
+#             "Country": country,
+#             "Indicator": indicator,
+#             "Region": region,
+#             "kpss_stat": None,
+#             "kpss_p_value": None,
+#             "kpss_stationary_flag": "Constant Series (Skipped)"
+#         }])
+
+        
+#     ## Run KPSS
+#     try:
+#         kpss_stat, p_value, _, _ = kpss(
+#             ts,
+#             regression="c",
+#             nlags="auto"
+#         )
+
+#         return pd.DataFrame([{
+#                 "Country": country,
+#                 "Indicator": indicator,
+#                 "Region": region,
+#                 "kpss_stat": kpss_stat,
+#                 "kpss_p_value": p_value,
+#                 "kpss_stationary_flag": 
+#                     "Stationary" if p_value >= 0.05
+#                     else "Non-Stationary"
+#         }])
+
+
+#     except Exception as e:
+#         return pd.DataFrame([{
+#                 "Country": country,
+#                 "Indicator": indicator,
+#                 "Region": region,
+#                 "kpss_stat": None,
+#                 "kpss_p_value": None,
+#                 "kpss_stationary_flag": f"KPSS Failed: {str(e)}"
+#         }])
 
 # METADATA ********************
 
@@ -277,47 +512,79 @@ kpss_results = (compiled_drivers.groupBy("Country", "Indicator","Region")
 
 # CELL ********************
 
-df_stationary_stats = adf_results.join(kpss_results, ["Country", "Indicator","Region"])
+def stationary_flag(df_stationary_stats):
+        
+    ## add valid/invalid flag
+        ## if valid then 1 otherwise 0
+    df_stationary_stats = df_stationary_stats.withColumn("valid_flag", 
+        when(
+            (
+                (col("adf_stationary_flag").isin("Constant Series (Skipped)", "ADF Failed: Invalid input, x is constant", "Insufficient Data")) |
+                (col("kpss_stationary_flag").isin("Constant Series (Skipped)", "Insufficient Data (<12 obs)","KPSS Failed: cannot convert float infinity to integer"))
+            ), lit(0)
+        ).otherwise(lit(1))
+        
+    )
+
+    driver_final_stats = df_stationary_stats.withColumn(
+        "ADF_is_stationary",
+        when(col("valid_flag")==0, None)
+        .when(col("adf_p_value") < 0.05, 1)
+        .otherwise(0)
+    )
+
+    driver_final_stats = driver_final_stats.withColumn(
+        "KPSS_is_stationary",
+        when(col("valid_flag")==0, None)
+        .when(col("kpss_p_value") > 0.05, 1)
+        .otherwise(0)
+    )
 
 
-## add valid/invalid flag
-    ## if valid then 1 otherwise 0
-df_stationary_stats = df_stationary_stats.withColumn("valid_flag", 
-    when(
-        (
-            (col("adf_stationary_flag").isin("Constant Series (Skipped)", "ADF Failed: Invalid input, x is constant", "Insufficient Data")) |
-            (col("kpss_stationary_flag").isin("Constant Series (Skipped)", "Insufficient Data (<12 obs)","KPSS Failed: cannot convert float infinity to integer"))
-        ), lit(0)
-    ).otherwise(lit(1))
-    
-)
-
-driver_final_stats = df_stationary_stats.withColumn(
-    "ADF_is_stationary",
-    when(col("valid_flag")==0, None)
-    .when(col("adf_p_value") < 0.05, 1)
-    .otherwise(0)
-)
-
-driver_final_stats = driver_final_stats.withColumn(
-    "KPSS_is_stationary",
-    when(col("valid_flag")==0, None)
-    .when(col("kpss_p_value") > 0.05, 1)
-    .otherwise(0)
-)
+    return driver_final_stats
+#df_stationary_stats = adf_results.join(kpss_results, ["Country", "Indicator","Region"])
 
 
-## if both tests identified the driver as stationary then use directly for CCF otherwise apply differencing transformation
-driver_final_stats = driver_final_stats.withColumn(
-        "stationary_class",
-        when((col("ADF_is_stationary")==1) & (col("KPSS_is_stationary")==1), "Stationary_use_levels")
-        .when((col("ADF_is_stationary")==1) & (col("KPSS_is_stationary")==0), "Detrend")
-        .otherwise("Log_diff")
-    )\
-    .drop("ADF_status","KPSS_status","ADF_is_stationary","KPSS_is_stationary")
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+T_results = T_adf_results.join(T_kpss_results, [*T_DRV_GRP_COLS], "inner")
+M_results = M_adf_results.join(M_kpss_results, [*M_DRV_GRP_COLS], "inner")
+
+T_stationary_stats = stationary_flag(T_results)
+M_stationary_stats = stationary_flag(M_results)
+
+display(T_stationary_stats.limit(10))
+display(M_stationary_stats.limit(10))
 
 
-driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.driver_stats")
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+    driver_final_stats.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.driver_stats")
 
 # METADATA ********************
 
@@ -348,33 +615,19 @@ middle_cutoff_data = spark.read.table("Sales_Forecasting.silver.middle_cutoff_da
 
 # CELL ********************
 
-## aggregate by Region & Indicator & Date
-aggregated_feature_set = feature_set.groupBy("Region","Indicator","Date").agg(sum("Value").alias("Value"))
-aggregated_feature_set = aggregated_feature_set.withColumn("Country", col("Region"))
-feature_set = feature_set.unionByName(aggregated_feature_set)
+# driver_classification = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.driver_stats")\
+#         .drop('adf_stat',
+#             'adf_p_value',
+#             'adf_stationary_flag',
+#             'kpss_stat',
+#             'kpss_p_value',
+#             'kpss_stationary_flag',)
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-driver_classification = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.driver_stats")\
-        .drop('adf_stat',
-            'adf_p_value',
-            'adf_stationary_flag',
-            'kpss_stat',
-            'kpss_p_value',
-            'kpss_stationary_flag',)
-
-feature_set_valid = broadcast(
-    driver_classification.filter(col("valid_flag")==1)
-).join(
-    feature_set, ["Country","Indicator","Region"], "inner"
-).drop("valid_flag","stationary_class")
+# feature_set_valid = broadcast(
+#     driver_classification.filter(col("valid_flag")==1)
+# ).join(
+#     feature_set, ["Country","Indicator","Region"], "inner"
+# ).drop("valid_flag","stationary_class")
 
 # METADATA ********************
 
@@ -407,31 +660,37 @@ def stl_decompose(pdf: pd.DataFrame) -> pd.DataFrame:
 
 # CELL ********************
 
-topline_schema = StructType([
-    StructField("Product_Category", StringType(), False),
-    StructField("series", StringType(), False),
-    StructField("Date", DateType(), False),
-    StructField("Value", DoubleType(), True),
-    StructField("residual", DoubleType(), True)
-])
+T_ACT_GRP_COLS = ['Product_Category','series']
+M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
 
-topline_residuals = topline_cutoff_data.groupBy("Product_Category","series")\
+T_schema = StructType(
+    [StructField(c, StringType(), False) for c in T_ACT_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
+
+T_data = topline_cutoff_data.groupBy(*T_ACT_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+topline_residuals = T_data.groupBy(*T_ACT_GRP_COLS)\
         .applyInPandas(
             stl_decompose,
-            schema=topline_schema
+            schema=T_schema
         )
 
-middle_schema = StructType([
-    StructField("Product_Category", StringType(), False),
-    StructField("Region", StringType(), False),
-    StructField("series", StringType(), False),
-    StructField("Date", DateType(), False),
-    StructField("Value", DoubleType(), True),
-    StructField("residual", DoubleType(), True)
-])
+M_schema = StructType(
+    [StructField(c, StringType(), False) for c in M_ACT_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
 
-middle_residuals = middle_cutoff_data.groupBy("Product_Category","Region","series")\
-    .applyInPandas(stl_decompose, schema=middle_schema)
+M_data = middle_cutoff_data.groupBy(*M_ACT_GRP_COLS,'Date').agg(sum("Value").alias("Value"))
+middle_residuals = M_data.groupBy(*M_ACT_GRP_COLS)\
+    .applyInPandas(stl_decompose, schema=M_schema)
 
 # METADATA ********************
 
@@ -442,17 +701,87 @@ middle_residuals = middle_cutoff_data.groupBy("Product_Category","Region","serie
 
 # CELL ********************
 
-feature_set_schema = StructType([
-    StructField("Country", StringType(), False),
-    StructField("Indicator", StringType(), False),
-    StructField("Region", StringType(), False),
-    StructField("Date", DateType(), False),
-    StructField("Value", DoubleType(), True),
-    StructField("residual", DoubleType(), True)
+T_feature_set_schema = StructType(
+    [StructField(c, StringType(), False) for c in T_DRV_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
+
+T_feature_set = feature_set.groupBy(*T_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+T_feature_set_residuals = T_feature_set.groupBy(*T_DRV_GRP_COLS).applyInPandas(stl_decompose, schema=T_feature_set_schema)
+
+M_feature_set_schema = StructType(
+    [StructField(c, StringType(), False) for c in M_DRV_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
+
+M_feature_set = feature_set.groupBy(*M_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+M_feature_set_residuals = M_feature_set.groupBy(*M_DRV_GRP_COLS).applyInPandas(stl_decompose, schema=M_feature_set_schema)
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(topline_residuals.limit(10))
+display(middle_residuals.limit(10))
+display(T_feature_set_residuals.limit(10))
+display(M_feature_set_residuals.limit(10))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# # HORVATH/TOPLINE TEMP CODE
+
+# CELL ********************
+
+# original_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data").withColumnRenamed("Quantity","Value")
+# display(original_data.groupBy('series').agg(min('Date').alias('Date')).orderBy(asc('Date')))
+
+## min date for cutoff was 2015-06-01 leverage for all data
+topline_org = spark.read.table('Sales_Forecasting.bronze.topline_data').withColumnRenamed("Quantity","Value")
+topline_org = topline_org.filter(col("Date")>='2015-06-01')
+aggregated_data = topline_org.groupBy('Date').agg(sum('Value').alias('Value'))
+aggregated_data = aggregated_data.withColumn('aggregation', lit('Horvath_topline'))
+
+horvath_schema = StructType([
+    StructField('aggregation', StringType(), False),
+    StructField('Date', DateType(), False),
+    StructField('Value', DoubleType(), True),
+    StructField('residual', DoubleType(), True)
 ])
 
-feature_set_residuals = feature_set_valid.groupBy("Country","Indicator", "Region")\
-    .applyInPandas(stl_decompose, schema=feature_set_schema)
+horvath_residuals = aggregated_data.groupBy('aggregation').applyInPandas(stl_decompose, schema=horvath_schema)
+
+display(horvath_residuals.limit(10))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # METADATA ********************
 
@@ -552,19 +881,19 @@ expanded_topline = topline_residuals.join(
     broadcast(topline_pairs),
     #topline_residuals["series"]==topline_pairs["series"],
     ["series"],
-    "left"
+    "inner"
 )#.drop(topline_pairs["series"])
 
-display(expanded_topline.limit(5))
+display(expanded_topline.orderBy('series','Country','Indicator',asc('target_date')).limit(5))
 
 expanded_middle = middle_residuals.join(
     broadcast(middle_pairs),
     (middle_residuals["series"]==middle_pairs["series"]) & 
     (middle_residuals["target_region"] == middle_pairs["target_region"]),
-    "left"
+    "inner"
 ).drop(middle_pairs["series"],middle_pairs["target_region"])
 
-display(expanded_middle.limit(5))
+display(expanded_middle.orderBy('series','Country','Indicator',asc('target_date')).limit(5))
 
 # METADATA ********************
 
@@ -590,9 +919,9 @@ expanded_middle.write.format("delta").mode("overwrite").saveAsTable("Sales_Forec
 ## Creating Expanded version of the middle & topline features based on the pair mappings
 expanded_t_features = broadcast(topline_pairs).join(
     feature_set_residuals,
-    ["feature_region","Indicator"],
+    ["feature_region","Country","Indicator"],
     "inner"
-).drop(feature_set_residuals["Country"])
+)
 
 display(expanded_t_features.limit(3))
 
@@ -708,8 +1037,26 @@ middle_final.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecast
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# # HORVATH/TOPLINE TEMP CODE
+
 # CELL ********************
 
+display(topline.select('feature_region','Country','Indicator').distinct())
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline = spark.read.table('Sales_Forecasting.Driver_Exploration_V2.topline_w_features').select('target_date','Indicator','feature_residual').distinct()
+display(topline.orderBy('Indicator',asc('target_date')).limit(100))
 
 # METADATA ********************
 
@@ -734,21 +1081,16 @@ def compute_ccf(pdf):
     results = []
 
 
-    for lag in range(-24, 25):
+    for lag in range(-24, 24):
 
-        if lag < 0:
-            d = driver.iloc[:lag]
-            t = target.iloc[-lag:]
+        shifted_driver = driver.shift(lag)
 
-        elif lag > 0:
-            d = driver.iloc[lag:]
-            t = target.iloc[:-lag]
+        valid = pd.concat([shifted_driver, target], axis=1,keys=['driver','target']).dropna()
 
+        if len(valid)>1:
+            corr = valid['driver'].corr(valid['target'])
         else:
-            d = driver
-            t = target
-
-        corr = d.corr(t) if len(d) > 1 and len(t) > 1 else None
+            corr = None
 
         if 'target_region' in pdf.columns:
             results.append({
@@ -857,6 +1199,20 @@ middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecastin
 
 # MARKDOWN ********************
 
+# # TEMP/HORVATH LEVEL ANALYSIS
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
 # ## Stage 4: Feature Selection
 # For each time series w/ all potential driver/feature combinations
 # - Correlation Filtering (Pearson/Spearman) strength threshold/ranking
@@ -870,26 +1226,6 @@ middle_ccf.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecastin
 topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_ccf_base")
 middle_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_ccf_base")
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-print(topline_ccf.columns)
-print(middle_ccf.columns)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 display(topline_ccf.select('series','feature_region','Country','Indicator').distinct().groupBy('series').count())
 display(middle_ccf.select('series','feature_region','Country','Indicator').distinct().groupBy('series').count())
@@ -1156,6 +1492,7 @@ def top_x_feature_extraction(df_f_resid, df_ccf_filtered, num_features):
 
     top_x_features = top_x_features
     w = Window.partitionBy("series","feature_region","Indicator").orderBy("Lag").rowsBetween(-1,1)
+    
     top_x_features = top_x_features\
         .withColumn('rolling_corr_avg', mean(col("Correlation")).over(w))\
         .withColumn('rolling_corr_std', stddev(col("Correlation")).over(w))\
@@ -1213,8 +1550,8 @@ final_topline_features = top_x_feature_extraction(topline_w_features, topline_cc
 
 # CELL ********************
 
-final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_top_features")
-final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_top_features")
+display(final_topline_features.groupBy('series').agg(countDistinct('feature_region','Country','Indicator').alias('count_features')))
+display(final_middle_features.groupBy('series').agg(countDistinct('feature_region','Country','Indicator').alias('count_features')))
 
 # METADATA ********************
 
@@ -1225,7 +1562,20 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 
 # CELL ********************
 
-print(final_topline_features.columns)
+display(final_topline_features.filter(col('series')=='ALU').select('Indicator').distinct())
+display(final_topline_features.filter(col('series')=='ALU'))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_top_features")
+final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_top_features")
 
 # METADATA ********************
 
@@ -1378,6 +1728,204 @@ drivers_FE = drivers_FE.withColumn("YoY_pct",
 drivers_FE = drivers_FE.withColumn("MoM_pct",
                         when(lag("Value",1).over(w)==0, None)
                         .otherwise((col("Value") / lag("Value", 1).over(w))-1))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# # Full Pipeline Automation
+# - ADF test
+# - 
+
+# CELL ********************
+
+def adf(df):
+    pdf = df.sort_values("Date")
+    result = {c: pdf[c].iloc[0] for c in drv_grp_cols}
+
+
+    ts = (
+        pd.to_numeric(pdf["Value"], errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .values
+    )
+
+
+    if len(ts) < 12:
+        return pd.DataFrame([{
+            "adf_stat": None,
+            "adf_p_value": None,
+            "adf_stationary_flag": "Insufficient Data"            
+        }])
+    
+    if np.nanstd(ts) == 0:
+        result.update([{
+            "adf_stat": None,
+            "adf_p_value": None,
+            "adf_stationary_flag": "Constant Series (Skipped)"
+        }])
+        return pd.DataFrame([result])
+
+
+    ## ADF execution
+    try:
+        adf_stat, p_value, *_ = adfuller(ts)
+
+        result.update([{
+            "adf_stat": adf_stat,
+            "adf_p_value": p_value,
+            "adf_stationary_flag": (
+                "Stationary" if p_value < 0.05
+                else "Non Stationary"
+            )
+        }])
+        return pd.DataFrame([result])
+
+    except Exception as e:
+        result.update([{
+            "adf_stat": None,
+            "adf_p_value": None,
+            "adf_stationary_flag": f"ADF Failed: {str(e)}"
+        }])
+        return pd.DataFrame([result])
+    
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+def full_pipeline(compiled_drivers, drv_grp_cols ):
+    adf_schema = StructType(
+        [StructField(c, StringType(), False) for c in drv_grp_cols] +
+        [
+            StructField("adf_stat", DoubleType(), True),
+            StructField("adf_p_value", DoubleType(), True),
+            StructField("adf_stationary_flag", StringType(), True)
+        ]
+    )
+
+    adf_results = compiled_drivers.groupBy(*drv_grp_cols).applyInPandas(adf, adf_schema)
+    return adf_results
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+compiled_drivers = spark.read.table('Sales_Forecasting.silver.compiled_drivers')
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+drv_grp_cols = ['Indicator']
+topline_test = full_pipeline(compiled_drivers, drv_grp_cols)
+display(topline_test)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+def full_pipeline(compiled_drivers, drv_grp_cols):
+
+    adf_schema = StructType(
+        [StructField(c, StringType(), False) for c in drv_grp_cols] +
+        [
+            StructField("adf_stat", DoubleType(), True),
+            StructField("adf_p_value", DoubleType(), True),
+            StructField("adf_stationary_flag", StringType(), True)
+        ]
+    )
+
+    def adf(df):
+
+        pdf = df.sort_values("Date")
+
+        # ALWAYS include group keys
+        result = {c: pdf[c].iloc[0] for c in drv_grp_cols}
+
+        ts = (
+            pd.to_numeric(pdf["Value"], errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna()
+            .values
+        )
+
+        # -------------------------
+        # insufficient data
+        # -------------------------
+        if len(ts) < 12:
+            result.update({
+                "adf_stat": None,
+                "adf_p_value": None,
+                "adf_stationary_flag": "Insufficient Data"
+            })
+            return pd.DataFrame([result])
+
+        # -------------------------
+        # constant series
+        # -------------------------
+        if np.nanstd(ts) == 0:
+            result.update({
+                "adf_stat": None,
+                "adf_p_value": None,
+                "adf_stationary_flag": "Constant Series (Skipped)"
+            })
+            return pd.DataFrame([result])
+
+        # -------------------------
+        # ADF test
+        # -------------------------
+        try:
+            adf_stat, p_value, *_ = adfuller(ts)
+
+            result.update({
+                "adf_stat": adf_stat,
+                "adf_p_value": p_value,
+                "adf_stationary_flag": (
+                    "Stationary" if p_value < 0.05 else "Non Stationary"
+                )
+            })
+
+        except Exception as e:
+            result.update({
+                "adf_stat": None,
+                "adf_p_value": None,
+                "adf_stationary_flag": f"ADF Failed: {str(e)}"
+            })
+
+        return pd.DataFrame([result])
+
+    return (
+        compiled_drivers
+        .groupBy(*drv_grp_cols)
+        .applyInPandas(adf, schema=adf_schema)
+    )
 
 # METADATA ********************
 

@@ -171,42 +171,21 @@ df_unpivot.head()
 
 # CELL ********************
 
-df_world = df_unpivot.groupby(["Indicator", "Currency", "Unit", "Date"], as_index=False)["Value"].sum()
-df_world["Country"] = "World"
+# df_world = df_unpivot.groupby(["Indicator", "Currency", "Unit", "Date"], as_index=False)["Value"].sum()
+# df_world["Country"] = "World"
 
-df_world = df_world[["Country", "Indicator", "Currency", "Unit", "Date", "Value"]]
+# df_world = df_world[["Country", "Indicator", "Currency", "Unit", "Date", "Value"]]
 
+# # -----------------------------------------------------------------------------
+# # APPEND WORLD DATAFRAME
+# # (assumes Macro_Trade_GD_World exists)
+# # -----------------------------------------------------------------------------
 
-# METADATA ********************
+# final_df = pd.concat(
+#     [df_unpivot, df_world],
+#     ignore_index=True
+# )
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# -----------------------------------------------------------------------------
-# APPEND WORLD DATAFRAME
-# (assumes Macro_Trade_GD_World exists)
-# -----------------------------------------------------------------------------
-
-final_df = pd.concat(
-    [df_unpivot, df_world],
-    ignore_index=True
-)
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-final_df.head()
 
 # METADATA ********************
 
@@ -235,6 +214,7 @@ spark_schema = StructType([
 
 # CELL ********************
 
+final_df = df_unpivot
 spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # METADATA ********************
