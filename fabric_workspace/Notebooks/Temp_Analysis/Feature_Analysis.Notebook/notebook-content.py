@@ -6,7 +6,18 @@
 # META   "kernel_info": {
 # META     "name": "synapse_pyspark"
 # META   },
-# META   "dependencies": {}
+# META   "dependencies": {
+# META     "lakehouse": {
+# META       "default_lakehouse": "22746de3-183e-4327-a844-dceda0b7165c",
+# META       "default_lakehouse_name": "Sales_Forecasting",
+# META       "default_lakehouse_workspace_id": "991f5e4b-c174-4ff2-992e-feb17d49d25a",
+# META       "known_lakehouses": [
+# META         {
+# META           "id": "22746de3-183e-4327-a844-dceda0b7165c"
+# META         }
+# META       ]
+# META     }
+# META   }
 # META }
 
 # CELL ********************
@@ -99,6 +110,52 @@ display(middle_feature_selection.filter(col("series")=='PISTON___APAC'))
 ## from the output click on "New Chart"
 ## create line chart, with Lag on the X axis and Correlation on the Y axis
 ## add feature_serie to the "serie" label and remove the legend from the visualization
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### Horvath Investigation
+
+# CELL ********************
+
+path = "/lakehouse/default/Files/Driver_Analysis/Horvath_topline_feature_analysis.xlsx"
+
+horvath_features = spark.createDataFrame(pd.read_excel(path))
+display(horvath_features)
+
+## from the output click on "New Chart"
+## create line chart, with Lag on the X axis and Correlation on the Y axis
+## add Indicator to the "serie" label and remove the legend from the visualization
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+import os
+
+
+print(os.path.exists(path))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # METADATA ********************
 

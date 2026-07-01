@@ -42,6 +42,9 @@ from matplotlib.ticker import PercentFormatter
 from pyspark.sql.functions import pandas_udf
 import scipy.cluster.hierarchy as sch
 from scipy.spatial.distance import squareform
+from functools import reduce
+import operator
+from pyspark.sql.functions import col
 
 # METADATA ********************
 
@@ -68,6 +71,9 @@ T_ACT_COLS_RN = ['Product_Category', 'series']
 
 M_DRV_COLS_RN = ['feature_region','Indicator']
 M_ACT_COLS_RN = ['Product_Category', 'series', 'target_region']
+
+T_series = ['series']
+M_series = ['series']
 
 
 # METADATA ********************
@@ -781,49 +787,6 @@ display(M_feature_set_residuals.limit(10))
 
 # MARKDOWN ********************
 
-# # HORVATH/TOPLINE TEMP CODE
-
-# CELL ********************
-
-# original_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data").withColumnRenamed("Quantity","Value")
-# display(original_data.groupBy('series').agg(min('Date').alias('Date')).orderBy(asc('Date')))
-
-## min date for cutoff was 2015-06-01 leverage for all data
-topline_org = spark.read.table('Sales_Forecasting.bronze.topline_data').withColumnRenamed("Quantity","Value")
-topline_org = topline_org.filter(col("Date")>='2015-06-01')
-aggregated_data = topline_org.groupBy('Date').agg(sum('Value').alias('Value'))
-aggregated_data = aggregated_data.withColumn('aggregation', lit('Horvath_topline'))
-
-horvath_schema = StructType([
-    StructField('aggregation', StringType(), False),
-    StructField('Date', DateType(), False),
-    StructField('Value', DoubleType(), True),
-    StructField('residual', DoubleType(), True)
-])
-
-horvath_residuals = aggregated_data.groupBy('aggregation').applyInPandas(stl_decompose, schema=horvath_schema)
-
-display(horvath_residuals.limit(10))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
 # #### Application of CCF
 # 
 # #### Joining target / drivers prior to CCF calculation
@@ -901,10 +864,6 @@ expanded_m_features = broadcast(M_pairs).join(M_feature_set_residuals, [*M_DRV_C
 # META }
 
 # CELL ********************
-
-from functools import reduce
-import operator
-from pyspark.sql.functions import col
 
 def join_target_feature(
     target_df,
@@ -1230,34 +1189,6 @@ print("Parquet files written successfully.")
 
 # MARKDOWN ********************
 
-# # HORVATH/TOPLINE TEMP CODE
-
-# CELL ********************
-
-display(topline.select('feature_region','Country','Indicator').distinct())
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline = spark.read.table('Sales_Forecasting.Driver_Exploration_V2.topline_w_features').select('target_date','Indicator','feature_residual').distinct()
-display(topline.orderBy('Indicator',asc('target_date')).limit(100))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
 # ### CCF Compute
 
 # CELL ********************
@@ -1499,20 +1430,6 @@ print("Parquet files written successfully.")
 
 # MARKDOWN ********************
 
-# # TEMP/HORVATH LEVEL ANALYSIS
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
 # ## Stage 4: Feature Selection
 # For each time series w/ all potential driver/feature combinations
 # - Correlation Filtering (Pearson/Spearman) strength threshold/ranking
@@ -1550,7 +1467,7 @@ display(middle_ccf.select(*M_cols).distinct().groupBy('series').count())
 
 # CELL ********************
 
-def ccf_filtering(df, cols):
+def ccf_filtering(df, cols, serie_col):
     window = Window.partitionBy(*cols)
     df = df.withColumn("abs_corr", abs(col("Correlation")))
     df = df.withColumn("max_corr", max(col("abs_corr")).over(window))
@@ -1566,7 +1483,10 @@ def ccf_filtering(df, cols):
 
     df_ranked = df_filtered.groupBy(*cols).agg(first(col("max_corr")).alias("max_corr"))
 
-    w = Window.partitionBy("series").orderBy(desc("max_corr"))
+    if len(serie_col) == 0:
+        w = Window.orderBy(desc('max_corr'))
+    else:
+        w = Window.partitionBy(*serie_col).orderBy(desc("max_corr"))
 
     df_ranked = df_ranked.withColumn("rank", rank().over(w))
     df_rank_filtered = df_ranked.filter(col("rank")<=500)
@@ -1797,25 +1717,43 @@ def top_x_feature_extraction(df_f_resid, df_ccf_filtered, grp_cols, act_cols, nu
         join_cond, 'inner'
     ).select(*[col(f"ij.{c}") for c in ij.columns],c_df['cluster'])
 
+    if 'series' in grp_cols:
+        cluster_corr_w = Window.partitionBy("series", "cluster").orderBy(desc("max_corr"))
 
-    cluster_corr_w = Window.partitionBy("series", "cluster").orderBy(desc("max_corr"))
+        data_distinct = data_w_cluster.select("series","feature_id","cluster","max_corr").distinct()
 
-    data_distinct = data_w_cluster.select("series","feature_id","cluster","max_corr").distinct()
+        data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
 
-    data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
+        data_filtered = data_distinct.filter(col("cluster_rank")<=3)
 
-    data_filtered = data_distinct.filter(col("cluster_rank")<=3)
+        ## joining remaining features w/ original data
+        df = data_filtered.alias('df')
 
+        post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['series'],df['max_corr'])
 
-    ## joining remaining features w/ original data
-    df = data_filtered.alias('df')
+        ## ranking series within clusters
+        ranked_w = Window. partitionBy("series").orderBy(desc('max_corr'))
 
-    post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['series'],df['max_corr'])
+        post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
 
-    ## ranking series within clusters
-    ranked_w = Window. partitionBy("series").orderBy(desc('max_corr'))
+    else:
+        cluster_corr_w = Window.partitionBy("cluster").orderBy(desc("max_corr"))
 
-    post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
+        data_distinct = data_w_cluster.select("feature_id","cluster","max_corr").distinct()
+
+        data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
+
+        data_filtered = data_distinct.filter(col("cluster_rank")<=3)
+
+        ## joining remaining features w/ original data
+        df = data_filtered.alias('df')
+
+        post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['max_corr'])
+
+        ## ranking w/o series within clusters
+        ranked_w = Window.orderBy(desc('max_corr'))
+
+        post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))    
 
     top_x_features = post_cluster_filtering.filter(col("feature_rank")<=num_features).select(*grp_cols,"Lag","Correlation","abs_corr","max_corr","feature_rank")
 
@@ -2216,6 +2154,191 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 #     topline_f.to_excel(writer, sheet_name="Topline_Features", index=False)
 #     middle_f.to_excel(writer, sheet_name="Middle_Featuers", index=False)
 #     print(f"saved to {output_path}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# # Full parameterized pipeline / Horvath implementation
+
+# CELL ********************
+
+H_DRV_GRP_COLS = ['Indicator']
+H_ACT_GRP_COLS = []
+
+H_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+H_ACT_RENAME = {"Date":"target_date","residual":"target_residual"}
+
+H_DRV_COLS_RN = ['Indicator']
+H_ACT_COLS_RN = []
+
+H_cols = (H_DRV_COLS_RN + H_ACT_COLS_RN)
+H_series = []
+
+
+## ADF test
+H_adf_schema = StructType(
+    [StructField(c, StringType(), False) for c in H_DRV_GRP_COLS] +
+    [
+        StructField("adf_stat", DoubleType(), True),
+        StructField("adf_p_value", DoubleType(), True),
+        StructField("adf_stationary_flag", StringType(), True)
+    ]
+)
+
+H_drivers = compiled_drivers.groupBy(*H_DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
+H_adf_results = H_drivers.groupBy(*H_DRV_GRP_COLS).applyInPandas(adf, H_adf_schema)
+
+
+
+## KPSS
+H_kpss_schema = StructType(
+    [StructField(c, StringType(), False) for c in H_DRV_GRP_COLS] +
+    [
+        StructField("kpss_stat", DoubleType(), True),
+        StructField("kpss_p_value", DoubleType(), True),
+        StructField("kpss_stationary_flag", StringType(), False)
+    ]
+)
+
+
+H_kpss_results = H_drivers.groupBy(*H_DRV_GRP_COLS)\
+                    .applyInPandas(kpss, schema=H_kpss_schema)
+
+
+
+## COMBINING RESULSTS
+H_results = H_adf_results.join(H_kpss_results, [*H_DRV_GRP_COLS], "inner")
+
+
+H_stationary_display(H_stationary_stats.limit(10))
+
+
+
+# original_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data").withColumnRenamed("Quantity","Value")
+# display(original_data.groupBy('series').agg(min('Date').alias('Date')).orderBy(asc('Date')))
+
+## min date for cutoff was 2015-06-01 leverage for all data
+H_org = spark.read.table('Sales_Forecasting.bronze.topline_data').withColumnRenamed("Quantity","Value")
+H_org = H_org.filter(col("Date")>='2015-06-01')
+H_data = H_org.groupBy('Date').agg(sum('Value').alias('Value'))
+#H_data = H_data.withColumn('aggregation', lit('Horvath_topline'))
+
+# horvath_schema = StructType([
+#     StructField('aggregation', StringType(), False),
+#     StructField('Date', DateType(), False),
+#     StructField('Value', DoubleType(), True),
+#     StructField('residual', DoubleType(), True)
+# ])
+
+# horvath_residuals = aggregated_data.groupBy('aggregation').applyInPandas(stl_decompose, schema=horvath_schema)
+
+# display(horvath_residuals.limit(10))
+
+
+
+## STL DECOMPOSITION
+
+## H RESIDUALS
+H_schema = StructType(
+    [StructField(c, StringType(), False) for c in H_ACT_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
+
+
+H_residuals = H_data.groupBy(*H_ACT_GRP_COLS)\
+        .applyInPandas(
+            stl_decompose,
+            schema=H_schema
+        )
+
+
+
+## FEATURE RESIDUALS
+feature_set = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
+
+H_feature_set_schema = StructType(
+    [StructField(c, StringType(), False) for c in H_DRV_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
+
+H_feature_set = feature_set.groupBy(*H_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+H_feature_set_residuals = H_feature_set.groupBy(*H_DRV_GRP_COLS).applyInPandas(stl_decompose, schema=H_feature_set_schema)
+
+
+
+
+## APPLICATION OF CCF
+H_feature_set_residuals = H_feature_set_residuals.withColumnsRenamed(H_DRV_RENAME)
+H_residuals = H_residuals.withColumnsRenamed(H_ACT_RENAME)
+
+
+
+## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
+
+    ## TOPLINE
+H_act_distinct = H_residuals.select(*H_ACT_COLS_RN).distinct()
+H_drv_distinct = H_feature_set_residuals.select(*H_DRV_COLS_RN).distinct()
+
+
+H_pairs = H_act_distinct.crossJoin(H_drv_distinct)
+
+if len(H_ACT_COLS_RN) == 0:
+    H_expanded = H_residuals.crossJoin(broadcast(H_pairs))
+else:
+    H_expanded = H_residuals.join(broadcast(H_pairs), [*H_ACT_COLS_RN], 'inner')
+
+H_expanded_features = broadcast(H_pairs).join(H_feature_set_residuals, [*H_DRV_COLS_RN], 'inner')
+
+
+H_final = join_target_feature(
+    H_expanded, H_expanded_features, H_cols
+)
+
+
+
+H_ccf_schema = StructType(
+    [StructField(c, StringType(), False) for c in H_cols] +
+    [
+
+        StructField("Lag", IntegerType(), False),
+        StructField("Correlation", DoubleType(), True)
+    ]
+)
+
+H_ccf = H_final.groupBy(*H_cols).applyInPandas(apply_ccf, schema = H_ccf_schema)
+
+H_ccf_filtered = ccf_filtering(H_ccf, H_cols, H_series)
+
+H_w_features = H_final
+
+display(H_w_features.groupBy(*H_ACT_COLS_RN).agg(countDistinct(*H_DRV_COLS_RN).alias('count_indicators')))
+
+final_H_features = top_x_feature_extraction(H_w_features, H_ccf_filtered, H_cols, H_ACT_COLS_RN, 30)
+
+display(final_H_features.groupBy(*H_ACT_COLS_RN).agg(countDistinct(*H_DRV_COLS_RN).alias("count_indicators")))
+
+
+final_H = final_H_features.orderBy(*H_ACT_COLS_RN, asc('feature_rank'), *H_DRV_COLS_RN, 'Lag').toPandas()
+
+output_path = "/lakehouse/default/Files/Driver_Analysis/Horvath_topline_feature_analysis.xlsx"
+
+with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+    final_H.to_excel(writer, sheet_name="Horvath_Topline_Features", index=False)
+    print(f"saved to {output_path}")
 
 # METADATA ********************
 
