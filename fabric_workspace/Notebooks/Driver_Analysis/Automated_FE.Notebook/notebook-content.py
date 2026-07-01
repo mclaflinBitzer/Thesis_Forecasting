@@ -49,6 +49,20 @@ from tsfresh.utilities.dataframe_functions import impute
 
 # CELL ********************
 
+## TOPLINE
+T_series = ['series']
+T_DRV_GRP_COLS = ['Indicator']
+T_ACT_GRP_COLS = ['Product_Category','series']
+
+
+
+## MIDDLE
+M_series = ['series']
+M_DRV_GRP_COLS = ['Region','Indicator']
+M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
+
+
+
 
 # METADATA ********************
 
@@ -61,6 +75,42 @@ from tsfresh.utilities.dataframe_functions import impute
 
 #original drivers
 compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
+
+print(compiled_drivers.columns)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+T_aggregated_drivers = compiled_drivers.groupBy(*T_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+
+if 'Indicator' in T_DRV_GRP_COLS and len(T_DRV_GRP_COLS) > 1:
+    world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
+    
+    for cols in T_DRV_GRP_COLS:
+        if cols!='Indicator':
+            world_agg = world_agg.withColumn(cols, lit("World"))
+            print(f"{cols} added using .withColumn, populated with lit(World)")
+    T_aggregated_drivers = T_aggregated_drivers.unionByName(world_agg)
+else:
+    print('world agg already done')
+
+display(T_aggregated_drivers.limit(10))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # creating aggregated by region versions
 aggregated_feature_set = compiled_drivers.groupBy("Region","Indicator","Date").agg(sum("Value").alias("Value"))

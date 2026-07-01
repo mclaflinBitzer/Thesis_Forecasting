@@ -229,6 +229,8 @@ spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 # CELL ********************
 
 from pyspark.sql.functions import col
+
+spark_df = spark_df.filter(~(col("Country")=="Grand Total"))
 driver_time_bounds = (
                         spark_df
                                 .filter(col("Value").isNotNull() & ~isnan(col("Value")))

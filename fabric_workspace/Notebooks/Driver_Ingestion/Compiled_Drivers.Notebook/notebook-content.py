@@ -117,7 +117,6 @@ country_region_map = {
     # Special
     # --------------------
     "World": "World",
-    "Grand Total": "World",
 
     # --------------------
     # China

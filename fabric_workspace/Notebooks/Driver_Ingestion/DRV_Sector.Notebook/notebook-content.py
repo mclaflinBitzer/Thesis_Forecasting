@@ -217,6 +217,7 @@ spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 # CELL ********************
 
 from pyspark.sql.functions import *
+spark_df = spark_df.filter(~(col("Country")=="Grand Total"))
 driver_time_bounds = (
                         spark_df
                                 .filter(col("Value").isNotNull() & ~isnan(col("Value")))
@@ -258,29 +259,7 @@ filled_df = df_full.withColumn(
 
 # CELL ********************
 
-display(spark_df.orderBy("Country", "Indicator", "Date"))
-display(filled_df.orderBy("Country", "Indicator", "Date"))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 filled_df.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.bronze.DRV_Sector")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 
