@@ -54,7 +54,9 @@ T_series = ['series']
 T_DRV_GRP_COLS = ['Indicator']
 T_ACT_GRP_COLS = ['Product_Category','series']
 
+T_cols = T_ACT_GRP_COLS + T_DRV_GRP_COLS
 
+col_renamed = {"Quantity":"target_value","Value":"feature_value"}
 
 ## MIDDLE
 M_series = ['series']
@@ -87,7 +89,7 @@ print(compiled_drivers.columns)
 
 # CELL ********************
 
-T_aggregated_drivers = compiled_drivers.groupBy(*T_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+aggregated_drivers = compiled_drivers.groupBy(*T_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
 
 if 'Indicator' in T_DRV_GRP_COLS and len(T_DRV_GRP_COLS) > 1:
     world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
@@ -96,11 +98,10 @@ if 'Indicator' in T_DRV_GRP_COLS and len(T_DRV_GRP_COLS) > 1:
         if cols!='Indicator':
             world_agg = world_agg.withColumn(cols, lit("World"))
             print(f"{cols} added using .withColumn, populated with lit(World)")
-    T_aggregated_drivers = T_aggregated_drivers.unionByName(world_agg)
+    aggregated_drivers = aggregated_drivers.unionByName(world_agg)
 else:
     print('world agg already done')
 
-display(T_aggregated_drivers.limit(10))
 
 # METADATA ********************
 
@@ -111,45 +112,29 @@ display(T_aggregated_drivers.limit(10))
 
 # CELL ********************
 
+T_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data")
+T_data_distinct = T_data.select(*T_ACT_GRP_COLS).distinct()
+T_drv_distinct = aggregated_drivers.select(*T_DRV_GRP_COLS).distinct()
+T_drv_distinct = T_drv_distinct.withColumn('feature_serie', concat_ws("__", *T_DRV_GRP_COLS))
 
-# creating aggregated by region versions
-aggregated_feature_set = compiled_drivers.groupBy("Region","Indicator","Date").agg(sum("Value").alias("Value"))
-aggregated_feature_set = aggregated_feature_set.withColumn("Country", col("Region"))
+join_col = []
+for a_col in T_ACT_GRP_COLS:
+    for d_col in T_DRV_GRP_COLS:
+        if d_col == a_col:
+            join_col.append(d_col)
+            print(f"{d_col} added to join col list")
 
-# remove any drivers from the original set that aren't at "World" aggregation
-compiled_drivers = compiled_drivers.filter(col("Region")=="World")
+if len(join_col) == 0:
+    print(f"no shared columns so a cross join was done")
+    T_pairs = T_data_distinct.crossJoin(T_drv_distinct)
+else:
+    print(f"shared columns so the join was on {join_col}")
+    T_pairs = T_data_distinct.join(T_drv_distinct, join_col, 'inner')
 
-# join filtered original set w/ the aggregated drivers by region
-compiled_drivers = compiled_drivers.unionByName(aggregated_feature_set)
 
-compiled_drivers = compiled_drivers.withColumn('feature_serie', concat_ws("__","Country","Indicator","Region")).withColumnRenamed('Value','feature_value')
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline_pairs = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_pairs")
-topline_pairs = topline_pairs.withColumn('feature_serie', concat_ws("__",'Country',"Indicator","feature_region"))
-
-topline_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data").withColumnRenamed('Quantity','target_value')
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline_joined_data = topline_data.join(broadcast(topline_pairs), 'series','inner')
-topline_joined_data = topline_joined_data.join(compiled_drivers, ['feature_serie','Date'],'inner')
-display(topline_joined_data.limit(30))
+T_data = T_data.join(broadcast(T_pairs), T_ACT_GRP_COLS, 'inner')
+T_aggregated_drivers = aggregated_drivers.join(broadcast(T_pairs), T_DRV_GRP_COLS, 'inner')
+T_aggregated_drivers = T_aggregated_drivers.withColumnRenamed("Value","feature_value")
 
 
 # METADATA ********************
@@ -161,136 +146,9 @@ display(topline_joined_data.limit(30))
 
 # CELL ********************
 
-def tsfresh_extraction(df):
-
-    feature_serie = df['feature_serie'][0]
-
-    df = df.sort_values(['Date'])
-    X = extract_features(
-        df, 
-        column_id='feature_serie',
-        column_sort='Date',
-        column_value='feature_value')
-        
-    impute(X)
-
-    X = X.reset_index().melt(
-        id_vars='index',
-        var_name='tsfresh_feature',
-        value_name='value'
-    )
-
-
-    X.rename(columns={'index':'feature_serie'}, inplace=True)
-
-    X['series'] = serie
-
-    return X[['series','feature_serie','tsfresh_feature','value']]
-   
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(test.limit(3))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-tsfresh_schema = StructType([
-    StructField('feature_serie',StringType(), False),
-    StructField('tsfresh_feature', StringType(), False),
-    StructField('value', DoubleType(), False)
-])
-
-tsfresh_feature_output = compiled_drivers.groupBy('feature_serie').applyInPandas(tsfesh_extraction, schema=tsfresh_schema)
-display(tsfresh_feature_output)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-test = topline_joined_data.filter(col('series')=="ALU").select('series','feature_serie','Date','feature_value')
-test_schema = StructType([
-    StructField("series",StringType(), False),
-    StructField("feature_series", StringType(), False),
-    StructField('value', DoubleType(), False)
-])
-output = test.groupBy('series').applyInPandas(tsfresh_extraction, schema=test_schema)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-compiled_drivers.columns
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(output)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(output.count())
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-temp = topline_joined_data.filter(col('series')=="ALU").select('series','feature_serie','Date','feature_value')
-
-df = temp.toPandas()
-display(df)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+T_joined = T_data.join(T_aggregated_drivers, [*T_cols,'Date'], 'inner')
+T_joined = T_joined.withColumnsRenamed(col_renamed)
+display(T_joined.limit(3))
 
 # METADATA ********************
 

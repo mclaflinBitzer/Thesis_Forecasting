@@ -1342,9 +1342,19 @@ H_residuals = H_residuals.withColumnsRenamed(H_ACT_RENAME)
 H_act_distinct = H_residuals.select(*H_ACT_COLS_RN).distinct()
 H_drv_distinct = H_feature_set_residuals.select(*H_DRV_COLS_RN).distinct()
 
+join_col = []
+for a_col in H_ACT_COLS_RN:
+    for d_col in H_DRV_COLS_RN:
+        if a_col == d_col:
+            join_col.append(d_col)
+            print(f"{d_col} added to join col list")
 
-H_pairs = H_act_distinct.crossJoin(H_drv_distinct)
-
+if len(join_col) == 0:
+    print("no shared columns so cross join was done")
+    H_pairs = H_act_distinct.crossJoin(H_drv_distinct)
+else:
+    print(f"shared columns so the join was done on {join_col}")
+    H_pairs = H_act_distinct.join(H_drv_distinct, join_col, 'inner')
 if len(H_ACT_COLS_RN) == 0:
     H_expanded = H_residuals.crossJoin(broadcast(H_pairs))
 else:
