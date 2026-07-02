@@ -50,6 +50,54 @@ from scipy.spatial.distance import squareform
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# CELL ********************
+
+driver_test = spark.read.table("Sales_Forecasting.silver.compiled_drivers").filter(
+    (col("Indicator")=="Data Center") |
+    (col("Indicator")=="Cold Storage Plants") |
+    (col("Indicator")=="Food Processing Plants") |
+    (col("Indicator")=="Leisure & Hospitality Buildings") |
+    (col("Indicator")=="Stores") 
+)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print(driver_test.columns)
+
+pivot = (
+    driver_test
+    .groupBy("Date")
+    .pivot("Indicator")
+    .agg(first("Value"))
+    .orderBy("Date")
+)
+
+pivot_flagged = pivot.withColumn(
+    'same_value_flag', 
+    when(
+        (col("Data Center")==col("Food Processing Plants")) |
+        (col("Food Processing Plants")==col("Leisure & Hospitality Buildings")) |
+        (col("Leisure & Hospitality Buildings")==col("Stores")),
+         lit(1)
+        ).otherwise(lit(0))
+)
+
+display(pivot_flagged.filter(col("same_value_flag")==1).limit(50))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
 # ### Topline investigation
@@ -57,8 +105,6 @@ from scipy.spatial.distance import squareform
 # CELL ********************
 
 topline_feature_selection = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_top_features")
-topline_feature_selection = topline_feature_selection.withColumn("feature_serie", concat_ws("__","feature_region","Country","Indicator"))
-print(topline_feature_selection.columns)
 display(topline_feature_selection.select('series').distinct())
 
 # METADATA ********************
@@ -71,7 +117,13 @@ display(topline_feature_selection.select('series').distinct())
 # CELL ********************
 
 ## filter based on which serie you want to look into based on the distinct serie output above
-display(topline_feature_selection.filter(col("series")=="SCREWS"))
+display(topline_feature_selection.filter(col("series")=="ALU").filter(
+    (col("Indicator")=="Data Center") |
+    (col("Indicator")=="Cold Storage Plants") |
+    (col("Indicator")=="Food Processing Plants") |
+    (col("Indicator")=="Leisure & Hospitality Buildings") |
+    (col("Indicator")=="Stores") 
+))
 
 ## from the output click on "New Chart"
 ## create line chart, with Lag on the X axis and Correlation on the Y axis
