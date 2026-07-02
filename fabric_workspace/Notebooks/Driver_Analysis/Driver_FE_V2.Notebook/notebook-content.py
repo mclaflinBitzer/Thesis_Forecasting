@@ -1217,6 +1217,147 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 
 # CELL ********************
 
+# driver_test = spark.read.table("Sales_Forecasting.silver.compiled_drivers").filter(
+#     (col("Indicator")=="Data Center") |
+#     (col("Indicator")=="Cold Storage Plants") |
+#     (col("Indicator")=="Food Processing Plants") |
+#     (col("Indicator")=="Leisure & Hospitality Buildings") |
+#     (col("Indicator")=="Stores") 
+# )
+
+# H_DRV_GRP_COLS = ['Indicator']
+# H_ACT_GRP_COLS = []
+
+# H_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+# H_ACT_RENAME = {"Date":"target_date","residual":"target_residual"}
+
+# H_DRV_COLS_RN = ['Indicator']
+# H_ACT_COLS_RN = []
+
+# H_cols = (H_DRV_COLS_RN + H_ACT_COLS_RN)
+# H_series = []
+
+# H_feature_set_schema = StructType(
+#     [StructField(c, StringType(), False) for c in H_DRV_GRP_COLS] +
+#     [
+#         StructField("Date", DateType(), False),
+#         StructField("Value", DoubleType(), True),
+#         StructField("residual", DoubleType(), True)
+#     ]
+# )
+
+# H_org = spark.read.table('Sales_Forecasting.bronze.topline_data').withColumnRenamed("Quantity","Value")
+# H_org = H_org.filter(col("Date")>='2015-06-01')
+# H_data = H_org.groupBy('Date').agg(sum('Value').alias('Value'))
+
+# H_schema = StructType(
+#     [StructField(c, StringType(), False) for c in H_ACT_GRP_COLS] +
+#     [
+#         StructField("Date", DateType(), False),
+#         StructField("Value", DoubleType(), True),
+#         StructField("residual", DoubleType(), True)
+#     ]
+# )
+
+
+# H_residuals = H_data.groupBy(*H_ACT_GRP_COLS)\
+#         .applyInPandas(
+#             stl_decompose,
+#             schema=H_schema
+#         )
+
+
+# H_feature_set = driver_test.groupBy(*H_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+# H_feature_set_residuals = H_feature_set.groupBy(*H_DRV_GRP_COLS).applyInPandas(stl_decompose, schema=H_feature_set_schema)
+
+
+# pivot = (
+#     H_feature_set_residuals
+#     .groupBy("Date")
+#     .pivot("Indicator")
+#     .agg(first("residual"))
+#     .orderBy("Date")
+# )
+
+# ## APPLICATION OF CCF
+# H_feature_set_residuals = H_feature_set_residuals.withColumnsRenamed(H_DRV_RENAME)
+# H_residuals = H_residuals.withColumnsRenamed(H_ACT_RENAME)
+
+
+# ## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
+# H_act_distinct = H_residuals.select(*H_ACT_COLS_RN).distinct()
+# H_drv_distinct = H_feature_set_residuals.select(*H_DRV_COLS_RN).distinct()
+
+# join_col = []
+# for a_col in H_ACT_COLS_RN:
+#     for d_col in H_DRV_COLS_RN:
+#         if a_col == d_col:
+#             join_col.append(d_col)
+#             print(f"{d_col} added to join col list")
+
+# if len(join_col) == 0:
+#     print("no shared columns so cross join was done")
+#     H_pairs = H_act_distinct.crossJoin(H_drv_distinct)
+# else:
+#     print(f"shared columns so the join was done on {join_col}")
+#     H_pairs = H_act_distinct.join(H_drv_distinct, join_col, 'inner')
+# if len(H_ACT_COLS_RN) == 0:
+#     H_expanded = H_residuals.crossJoin(broadcast(H_pairs))
+# else:
+#     H_expanded = H_residuals.join(broadcast(H_pairs), [*H_ACT_COLS_RN], 'inner')
+
+
+# H_expanded_features = broadcast(H_pairs).join(H_feature_set_residuals, [*H_DRV_COLS_RN], 'inner')
+
+# H_final = join_target_feature(
+#     H_expanded, H_expanded_features, H_cols
+# )
+
+# H_ccf_schema = StructType(
+#     [StructField(c, StringType(), False) for c in H_cols] +
+#     [
+
+#         StructField("Lag", IntegerType(), False),
+#         StructField("Correlation", DoubleType(), True)
+#     ]
+# )
+
+# H_ccf = H_final.groupBy(*H_cols).applyInPandas(apply_ccf, schema = H_ccf_schema)
+
+
+# H_ccf_filtered = ccf_filtering(H_ccf, H_cols, H_series)
+
+# H_w_features = H_final
+
+# display(H_w_features.groupBy(*H_ACT_COLS_RN).agg(countDistinct(*H_DRV_COLS_RN).alias('count_indicators')))
+
+# final_H_features = top_x_feature_extraction(H_w_features, H_ccf_filtered, H_cols, H_ACT_COLS_RN, 30)
+
+# display(final_H_features.groupBy(*H_ACT_COLS_RN).agg(countDistinct(*H_DRV_COLS_RN).alias("count_indicators")))
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 H_DRV_GRP_COLS = ['Indicator']
 H_ACT_GRP_COLS = []
 
@@ -1261,11 +1402,12 @@ H_kpss_results = H_drivers.groupBy(*H_DRV_GRP_COLS)\
 
 
 
-## COMBINING RESULSTS
+## COMBINING RESULTS ADF & KPSS 
 H_results = H_adf_results.join(H_kpss_results, [*H_DRV_GRP_COLS], "inner")
 
 
-H_stationary_display(H_stationary_stats.limit(10))
+H_stationary_stats = stationary_falg(H_results)
+display(H_stationary_stats.limit(10))
 
 
 
@@ -1338,7 +1480,7 @@ H_residuals = H_residuals.withColumnsRenamed(H_ACT_RENAME)
 
 ## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
 
-    ## TOPLINE
+
 H_act_distinct = H_residuals.select(*H_ACT_COLS_RN).distinct()
 H_drv_distinct = H_feature_set_residuals.select(*H_DRV_COLS_RN).distinct()
 
@@ -1532,204 +1674,6 @@ drivers_FE = drivers_FE.withColumn("YoY_pct",
 drivers_FE = drivers_FE.withColumn("MoM_pct",
                         when(lag("Value",1).over(w)==0, None)
                         .otherwise((col("Value") / lag("Value", 1).over(w))-1))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# # Full Pipeline Automation
-# - ADF test
-# - 
-
-# CELL ********************
-
-def adf(df):
-    pdf = df.sort_values("Date")
-    result = {c: pdf[c].iloc[0] for c in drv_grp_cols}
-
-
-    ts = (
-        pd.to_numeric(pdf["Value"], errors="coerce")
-        .replace([np.inf, -np.inf], np.nan)
-        .dropna()
-        .values
-    )
-
-
-    if len(ts) < 12:
-        return pd.DataFrame([{
-            "adf_stat": None,
-            "adf_p_value": None,
-            "adf_stationary_flag": "Insufficient Data"            
-        }])
-    
-    if np.nanstd(ts) == 0:
-        result.update([{
-            "adf_stat": None,
-            "adf_p_value": None,
-            "adf_stationary_flag": "Constant Series (Skipped)"
-        }])
-        return pd.DataFrame([result])
-
-
-    ## ADF execution
-    try:
-        adf_stat, p_value, *_ = adfuller(ts)
-
-        result.update([{
-            "adf_stat": adf_stat,
-            "adf_p_value": p_value,
-            "adf_stationary_flag": (
-                "Stationary" if p_value < 0.05
-                else "Non Stationary"
-            )
-        }])
-        return pd.DataFrame([result])
-
-    except Exception as e:
-        result.update([{
-            "adf_stat": None,
-            "adf_p_value": None,
-            "adf_stationary_flag": f"ADF Failed: {str(e)}"
-        }])
-        return pd.DataFrame([result])
-    
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-def full_pipeline(compiled_drivers, drv_grp_cols ):
-    adf_schema = StructType(
-        [StructField(c, StringType(), False) for c in drv_grp_cols] +
-        [
-            StructField("adf_stat", DoubleType(), True),
-            StructField("adf_p_value", DoubleType(), True),
-            StructField("adf_stationary_flag", StringType(), True)
-        ]
-    )
-
-    adf_results = compiled_drivers.groupBy(*drv_grp_cols).applyInPandas(adf, adf_schema)
-    return adf_results
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-compiled_drivers = spark.read.table('Sales_Forecasting.silver.compiled_drivers')
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-drv_grp_cols = ['Indicator']
-topline_test = full_pipeline(compiled_drivers, drv_grp_cols)
-display(topline_test)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-def full_pipeline(compiled_drivers, drv_grp_cols):
-
-    adf_schema = StructType(
-        [StructField(c, StringType(), False) for c in drv_grp_cols] +
-        [
-            StructField("adf_stat", DoubleType(), True),
-            StructField("adf_p_value", DoubleType(), True),
-            StructField("adf_stationary_flag", StringType(), True)
-        ]
-    )
-
-    def adf(df):
-
-        pdf = df.sort_values("Date")
-
-        # ALWAYS include group keys
-        result = {c: pdf[c].iloc[0] for c in drv_grp_cols}
-
-        ts = (
-            pd.to_numeric(pdf["Value"], errors="coerce")
-            .replace([np.inf, -np.inf], np.nan)
-            .dropna()
-            .values
-        )
-
-        # -------------------------
-        # insufficient data
-        # -------------------------
-        if len(ts) < 12:
-            result.update({
-                "adf_stat": None,
-                "adf_p_value": None,
-                "adf_stationary_flag": "Insufficient Data"
-            })
-            return pd.DataFrame([result])
-
-        # -------------------------
-        # constant series
-        # -------------------------
-        if np.nanstd(ts) == 0:
-            result.update({
-                "adf_stat": None,
-                "adf_p_value": None,
-                "adf_stationary_flag": "Constant Series (Skipped)"
-            })
-            return pd.DataFrame([result])
-
-        # -------------------------
-        # ADF test
-        # -------------------------
-        try:
-            adf_stat, p_value, *_ = adfuller(ts)
-
-            result.update({
-                "adf_stat": adf_stat,
-                "adf_p_value": p_value,
-                "adf_stationary_flag": (
-                    "Stationary" if p_value < 0.05 else "Non Stationary"
-                )
-            })
-
-        except Exception as e:
-            result.update({
-                "adf_stat": None,
-                "adf_p_value": None,
-                "adf_stationary_flag": f"ADF Failed: {str(e)}"
-            })
-
-        return pd.DataFrame([result])
-
-    return (
-        compiled_drivers
-        .groupBy(*drv_grp_cols)
-        .applyInPandas(adf, schema=adf_schema)
-    )
 
 # METADATA ********************
 
