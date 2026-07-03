@@ -1029,7 +1029,7 @@ def top_x_feature_extraction(df_f_resid, df_ccf_filtered, grp_cols, act_cols, nu
         ]
     )
 
-    clustering = joined_df.groupBy(*act_cols).applyInPandas(corr_clustering, schema=schema)
+    clustering = joined_df.groupBy(*grp_cols).applyInPandas(corr_clustering, schema=schema)
 
 
 
@@ -1519,6 +1519,7 @@ H_ccf_schema = StructType(
         StructField("Correlation", DoubleType(), True)
     ]
 )
+
 
 H_ccf = H_final.groupBy(*H_cols).applyInPandas(apply_ccf, schema = H_ccf_schema)
 
