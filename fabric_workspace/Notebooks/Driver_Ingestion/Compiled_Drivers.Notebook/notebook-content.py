@@ -406,7 +406,25 @@ df_mapping = joined_df.withColumn(
 
 # CELL ********************
 
-df_mapping.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.silver.Compiled_Drivers")
+df_cleaned = df_mapping
+df_cleaned = (
+    df_cleaned
+    .withColumn("Indicator", trim(col("Indicator")))
+    .withColumn("Indicator", regexp_replace("Indicator", r"[^A-Za-z0-9]+", "_"))
+    .withColumn("Indicator", regexp_replace("Indicator", r"_+", "_"))
+    .withColumn("Indicator", regexp_replace("Indicator", r"^_|_$", ""))
+)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+df_cleaned.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.silver.Compiled_Drivers")
 
 # METADATA ********************
 
