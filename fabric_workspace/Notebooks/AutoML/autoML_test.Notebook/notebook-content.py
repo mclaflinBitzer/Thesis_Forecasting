@@ -107,9 +107,9 @@ import numpy as np
 
 df = spark.read.format("delta").load(
     "Tables/silver/topline_cutoff_data"
-).limit(100000).cache()
+).cache()
 # Transform to pandas according to the selected models
-X = df.limit(100000).toPandas() # Use df.toPandas() to use all the data
+X = df.toPandas() # Use df.toPandas() to use all the data
 X = X.rename(columns = lambda c:re.sub('[^A-Za-z0-9_]+', '_', c))  # Replace not supported characters in column name with underscore to avoid invalid character for model training and saving
 
 target_col = re.sub('[^A-Za-z0-9_]+', '_', "Quantity")

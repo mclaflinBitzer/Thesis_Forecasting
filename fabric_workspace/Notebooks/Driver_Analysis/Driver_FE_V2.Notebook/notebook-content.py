@@ -731,6 +731,9 @@ def apply_ccf(df):
 
     results = []
 
+    #total possible observations for the combination
+    total_obs = len(pdf)
+
     for lag in range(-24, 25):      # include +24
 
         shifted_driver = driver.shift(lag)
@@ -745,6 +748,9 @@ def apply_ccf(df):
             .dropna()
         )
 
+        n_overlap = len(valid)
+        coverage = n_overlap / total_obs if total_obs>0 else 0.0
+
         if len(valid) > 1:
             corr = valid["driver"].corr(valid["target"])
         else:
@@ -757,6 +763,8 @@ def apply_ccf(df):
             if pd.isna(corr) or np.isinf(corr)
             else float(corr)
         )
+        row['n_overlap'] = int(n_overlap)
+        row['coverage'] = float(coverage)
 
         results.append(row)
 
@@ -875,7 +883,9 @@ def ccf_filtering(df, cols, serie_col):
         (col("max_corr") > 0.15) &
         # (col("max_corr") < .95) &
         (col("Indicator").isNotNull()) &
-        (col("Indicator") != "NaN")
+        (col("Indicator") != "NaN") &
+        (col('coverage') >= 0.8) &
+        (col('n_overlap') >= 24)
     )
 
     df_ranked = df_filtered.groupBy(*cols).agg(first(col("max_corr")).alias("max_corr"))
@@ -1029,7 +1039,7 @@ def top_x_feature_extraction(df_f_resid, df_ccf_filtered, grp_cols, act_cols, nu
         ]
     )
 
-    clustering = joined_df.groupBy(*grp_cols).applyInPandas(corr_clustering, schema=schema)
+    clustering = joined_df.groupBy(*act_cols).applyInPandas(corr_clustering, schema=schema)
 
 
 
@@ -1346,18 +1356,6 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 # CELL ********************
 
 
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 H_DRV_GRP_COLS = ['Indicator']
 H_ACT_GRP_COLS = []
 
@@ -1370,6 +1368,16 @@ H_ACT_COLS_RN = []
 H_cols = (H_DRV_COLS_RN + H_ACT_COLS_RN)
 H_series = []
 
+H_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
 
 ## ADF test
 H_adf_schema = StructType(
@@ -1406,8 +1414,7 @@ H_kpss_results = H_drivers.groupBy(*H_DRV_GRP_COLS)\
 H_results = H_adf_results.join(H_kpss_results, [*H_DRV_GRP_COLS], "inner")
 
 
-H_stationary_stats = stationary_falg(H_results)
-display(H_stationary_stats.limit(10))
+H_stationary_stats = stationary_flag(H_results)
 
 
 
@@ -1416,8 +1423,7 @@ display(H_stationary_stats.limit(10))
 
 ## min date for cutoff was 2015-06-01 leverage for all data
 H_org = spark.read.table('Sales_Forecasting.bronze.topline_data').withColumnRenamed("Quantity","Value")
-H_org = H_org.filter(col("Date")>='2015-06-01')
-H_data = H_org.groupBy('Date').agg(sum('Value').alias('Value'))
+
 #H_data = H_data.withColumn('aggregation', lit('Horvath_topline'))
 
 # horvath_schema = StructType([
