@@ -73,13 +73,14 @@ df_raw = pd.read_excel(
 df_temp = df_raw.iloc[5:].reset_index(drop=True)
 
 
+
 # -----------------------------------------------------------------------------
 # FIRST HEADER PROMOTION
 # -----------------------------------------------------------------------------
 
 df_temp.columns = df_temp.iloc[0]
 
-df_df_tempstep1 = df_temp.iloc[1:].reset_index(drop=True)
+df_temp = df_temp.iloc[1:].reset_index(drop=True)
 
 
 # -----------------------------------------------------------------------------
@@ -92,7 +93,10 @@ df_temp.columns = [
 ]
 
 
-df_temp = df_temp.iloc[1:, 2:]
+df_temp = df_temp.iloc[:, 2:]
+
+## strip hanging .0 on year columns
+df_temp.columns = df_temp.columns.str.replace('\.0','', regex=True)
 
 
 
@@ -102,19 +106,18 @@ df_temp = df_temp.iloc[1:, 2:]
 
 year_cols = [
     col for col in df_temp.columns
-    if str(col).isdigit()
+    if col not in ['Country','Sector']
 ]
 
 # -----------------------------------------------------------------------------
 # CONVERT YEAR COLUMNS TO NUMERIC
 # -----------------------------------------------------------------------------
 
-for col in year_cols:
-    df_temp[col] = pd.to_numeric(
-        df_temp[col],
+for c in year_cols:
+    df_temp[c] = pd.to_numeric(
+        df_temp[c],
         errors="coerce"
     )
-
 
 
 # -----------------------------------------------------------------------------
@@ -140,7 +143,6 @@ df_unpivot = df_unpivot.rename(
     }
 )
 
-
 # -----------------------------------------------------------------------------
 # CONVERT DATE COLUMN
 # -----------------------------------------------------------------------------
@@ -158,34 +160,8 @@ df_unpivot["Value"] = pd.to_numeric(
     errors="coerce"
 )
 
+df_unpivot = df_unpivot.dropna(subset=['Value'])
 
-df_unpivot.head(10)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# ## Creating "world" grouping
-# df_world = df_unpivot.groupby(["Indicator","Date"], as_index=False)["Value"].sum()
-
-# df_world["Country"] = "World"
-# df_world = df_world[["Country","Indicator","Date","Value"]]
-
-
-# # -----------------------------------------------------------------------------
-# # APPEND EXISTING WORLD DATAFRAME
-# # Assumes Project_GD_World already exists
-# # -----------------------------------------------------------------------------
-
-# final_df = pd.concat(
-#     [df_unpivot, df_world],
-#     ignore_index=True
-# )
 
 # METADATA ********************
 

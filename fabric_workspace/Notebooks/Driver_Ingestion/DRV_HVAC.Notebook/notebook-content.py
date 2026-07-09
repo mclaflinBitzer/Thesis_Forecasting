@@ -105,6 +105,17 @@ for col in year_cols:
     )
 
 
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 # -----------------------------------------------------------------------------
 # UNPIVOT / MELT
 # -----------------------------------------------------------------------------
@@ -133,6 +144,9 @@ df_unpivot["Value"] = pd.to_numeric(
     errors="coerce"
 )
 
+df_unpivot = df_unpivot.dropna(subset=['Value'])
+
+
 # -----------------------------------------------------------------------------
 # GROUP BY COUNTRY + DATE
 # Aggregates all sectors/subsectors into HVAC indicator
@@ -160,36 +174,6 @@ df_grouped["Indicator"] = "HVAC"
 df_grouped = df_grouped[
     ["Country", "Indicator", "Date", "Value"]
 ]
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-## Removing as it is breaking logic downstream
-
-# # ## create world grouping
-# # df_world = df_grouped.groupby(["Date"],as_index=False)["Value"].sum()
-# # df_world["Country"] = "World"
-# # df_world["Indicator"] = "HVAC"
-
-# # df_world = df_world[["Country", "Indicator", "Date", "Value"]]
-
-# # -----------------------------------------------------------------------------
-# # APPEND WORLD DATAFRAME
-# # Assumes HVAC_GD_World already exists
-# # -----------------------------------------------------------------------------
-
-# final_df = pd.concat(
-#     [df_grouped, df_world],
-#     ignore_index=True
-# )
-
-# final_df.head()
 
 # METADATA ********************
 

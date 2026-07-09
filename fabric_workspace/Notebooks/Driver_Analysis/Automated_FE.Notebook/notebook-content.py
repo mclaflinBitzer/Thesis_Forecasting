@@ -127,6 +127,7 @@ else:
 ## shared
 col_renamed = {"Quantity":"target_value","Value":"feature_value"}
 driver_table = "Sales_Forecasting.silver.compiled_drivers"
+target_col = 'Value'
 
 
 # METADATA ********************

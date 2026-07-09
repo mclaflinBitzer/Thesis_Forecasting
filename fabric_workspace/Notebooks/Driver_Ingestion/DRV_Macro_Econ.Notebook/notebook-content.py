@@ -119,47 +119,8 @@ df_unpivot["Year"] = pd.to_datetime(
 
 df_unpivot = df_unpivot.rename(columns={"Year": "Date"})
 
+df_unpivot = df_unpivot.dropna(subset=['Value'])
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-df_unpivot.head()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-## Removing world logic
-
-# # df_world = df_unpivot.groupby(["Indicator", "Currency","Unit", "Date"], as_index=False)["Value"].sum()
-
-# # df_world["Country"] = "World"
-
-# # df_world = df_world[["Country", "Indicator", "Currency", "Unit", "Date", "Value"]]
-
-
-
-# # -----------------------------------------------------------------------------
-# # APPEND WORLD DATAFRAME
-# # Assumes Macro_Econ_GD_World already exists
-# # -----------------------------------------------------------------------------
-
-# final_df = pd.concat(
-#     [df_unpivot, df_world],
-#     ignore_index=True
-# )
 
 # METADATA ********************
 
@@ -247,18 +208,6 @@ filled_df = filled_df.withColumn(
               .rowsBetween(Window.unboundedPreceding, 0)
     )
 )
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(spark_df.orderBy("Country", "Indicator", "Date"))
-display(filled_df.orderBy("Country", "Indicator", "Date"))
 
 # METADATA ********************
 

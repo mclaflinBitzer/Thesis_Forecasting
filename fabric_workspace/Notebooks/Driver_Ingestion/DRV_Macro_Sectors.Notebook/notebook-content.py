@@ -167,6 +167,8 @@ df_unpivot = df_unpivot[
     ["Country", "Indicator", "Unit", "Date", "Value"]
 ]
 
+df_unpivot = df_unpivot.dropna(subset='Value')
+
 # METADATA ********************
 
 # META {
@@ -177,31 +179,6 @@ df_unpivot = df_unpivot[
 # CELL ********************
 
 df_unpivot.head()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# df_world = df_unpivot.groupby(["Indicator", "Unit", "Date"], as_index=False)["Value"].sum()
-# df_world["Country"] = "World"
-
-# df_world = df_world[["Country", "Indicator", "Unit", "Date", "Value"]]
-# # -----------------------------------------------------------------------------
-# # APPEND WORLD DATAFRAME
-# # (assumes Macro_Sector_GD_World already exists)
-# # -----------------------------------------------------------------------------
-
-# final_df = pd.concat(
-#     [df_unpivot, df_world],
-#     ignore_index=True
-# )
-
-
 
 # METADATA ********************
 

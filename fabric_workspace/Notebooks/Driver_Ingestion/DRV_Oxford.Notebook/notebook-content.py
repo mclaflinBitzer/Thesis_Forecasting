@@ -155,43 +155,7 @@ df_unpivot = df_unpivot[
 
 df_unpivot = df_unpivot.rename(columns={"Indicator code":"Indicator_Code"})
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-df_unpivot.head()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# df_world = df_unpivot.groupby(["Indicator", "Indicator_Code", "Date"], as_index=False)["Value"].sum()
-# df_world["Country"] = "World"
-
-# df_world = df_world[["Country", "Indicator", "Indicator_Code", "Date", "Value"]]
-
-# df_world.head()
-# # -----------------------------------------------------------------------------
-# # APPEND OXFORD WORLD DATA
-# # -----------------------------------------------------------------------------
-
-# final_df = pd.concat(
-#     [df_unpivot, df_world],
-#     ignore_index=True
-# )
-
-
-# final_df.head()
+df_unpivot = df_unpivot.dropna(subset='Value')
 
 # METADATA ********************
 
@@ -282,29 +246,7 @@ filled_df = filled_df.withColumn(
 
 # CELL ********************
 
-display(spark_df.orderBy("Country", "Indicator", "Date"))
-display(filled_df.orderBy("Country", "Indicator", "Date"))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 filled_df.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.bronze.DRV_Oxford")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 

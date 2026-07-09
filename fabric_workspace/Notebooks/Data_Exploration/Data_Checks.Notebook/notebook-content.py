@@ -20,6 +20,18 @@
 # META   }
 # META }
 
+# CELL ********************
+
+df = spark.read.table('Sales_Forecasting.bronze.Raw_Analyse_Sales_BPC')
+display(df.limit(100))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
 # # Data Exploration & Quality Assessment Framework
