@@ -58,6 +58,8 @@ T_DRV_COLS_RN = ['Indicator']
 
 T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
 T_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_feature_diagnostics.xlsx"
+T_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_selected_features.xlsx"
+
 
 ## MIDDLE
 M_series = ['series']
@@ -74,7 +76,7 @@ M_DRV_COLS_RN = ['feature_region','Indicator']
 
 M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
 M_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_feature_diagnostics.xlsx"
-
+M_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_selected_features.xlsx"
 
 ## shared
 col_renamed = {"Quantity":"target_value","Value":"feature_value"}
@@ -107,6 +109,7 @@ if Topline:
     DRV_COLS_RN = T_DRV_COLS_RN
 
     feature_diagnostics_file = T_feature_diagnostics_file
+    selected_feature_file = T_selected_feature_file 
 
 else:
     series = M_series 
@@ -123,6 +126,7 @@ else:
     DRV_COLS_RN = M_DRV_COLS_RN
 
     feature_diagnostics_file = M_feature_diagnostics_file
+    selected_feature_file = M_selected_feature_file
 
 ## shared
 col_renamed = {"Quantity":"target_value","Value":"feature_value"}
@@ -185,17 +189,6 @@ if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
 else:
     print('world agg already done')
 
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(aggregated_drivers.limit(10))
 
 # METADATA ********************
 
@@ -268,7 +261,7 @@ def feature_engineering(df, drv_grp_cols):
 # CELL ********************
 
 # applying feature_engineeringh method in order to expand the feature set
-expanded_features = feature_engineering(aggregated_drivers, DRV_GRP_COLS)
+expanded_features = feature_engineering(aggregated_drivers, DRV_GRP_COLS).cache()
 
 # METADATA ********************
 
@@ -354,10 +347,6 @@ def reformatting_data(df, drv_grp_cols):
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
-
-# MARKDOWN ********************
-
-# # TEMP DATA Filter to manage scale
 
 # CELL ********************
 
@@ -682,7 +671,8 @@ def top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, num_features):
 
 # CELL ********************
 
-filtered_features = top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, 50)
+DRV_GRP_COLS.append('Feature_name')
+filtered_features = top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, 50).cache()
 
 # METADATA ********************
 
@@ -717,10 +707,9 @@ expanded_features_long = expanded_features.unpivot(
     values=feature_value_cols,              ## the columns to unpivot from wide to long format
     variableColumnName="Feature_name",      ## column name of the original wide columns variable (col name)
     valueColumnName="Feature_value"         ## the column name of the original value within the wide columns 
-)
+).cache()
 
-
-
+print(DRV_GRP_COLS)
 grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
 
 combos = filtered_features.select(*grp_cols, "Lag").distinct()
@@ -731,7 +720,7 @@ target_w_features = (
     data
     .join(combos, ACT_GRP_COLS, "inner")
     .withColumn("driver_date", expr("add_months(Date, -Lag)"))
-)
+).cache()
 
 
 # METADATA ********************
@@ -744,6 +733,7 @@ target_w_features = (
 # CELL ********************
 
 ## creating join conditions based on the DRV GRP COLS
+
 
 conditions = []
 for col_name in DRV_GRP_COLS:
@@ -767,9 +757,7 @@ result = (
         join_cond,
         "left"
     ).select("t.*", "f.Feature_value")
-)
-
-display(result.limit(10))
+).cache()
 
 # METADATA ********************
 
@@ -806,7 +794,7 @@ TEST_FRAC = 0.2            # holdout fraction, taken from the END (time-respecti
 N_BOOT = 20                 # bootstrap resamples for stability selection
 BOOT_SAMPLE_FRAC = 0.8
 STABILITY_THRESHOLD = 0.6   # keep features selected in >=60% of bootstraps
-MAX_FEATURES_OUT = 25        # cap on final selected features per series
+MAX_FEATURES_OUT = 10        # cap on final selected features per series
 
 
 # ============================================================
@@ -829,9 +817,15 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
+    # the time trend is generating a base 'feature' that is designed to 'carry' trend, allowing residuals from the target to be explained by the features
+    wide['time_trend'] = np.arange(len(wide))
+    
+
+
     pdf = wide.copy()
 
     feature_cols = [c for c in pdf.columns if c not in id_cols + [target_col]]
+    
 
 
 
@@ -976,15 +970,15 @@ diagnostics_schema = StructType(
     [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
     [
         StructField("Feature", StringType(), False),
-        StructField("Coefficient", DoubleType(), True),
+        StructField("Coefficient", DoubleType(), True),         # ElasticNet's fitted weight for the feature
         StructField("abs_coef", DoubleType(), True),
         StructField("importance", DoubleType(), True),
         StructField("importance_pct", DoubleType(), True),
-        StructField("stability_score", DoubleType(), True),
+        StructField("stability_score", DoubleType(), True),     # fraction of bootstrap resamples where the feature had a non zero coefficient
         StructField("selected", IntegerType(), True),
-        StructField("best_alpha", DoubleType(), True),
-        StructField("best_l1_ratio", DoubleType(), True),
-        StructField("test_r2", DoubleType(), True),
+        StructField("best_alpha", DoubleType(), True),          # 0-.03 real signal, .1-1 reasonable signal to noise 3-10 little to no value add from drivers
+        StructField("best_l1_ratio", DoubleType(), True),       # 0-.1 Mostly Ridge (keeps correlated features), .9-1 mostly Lasso (zeroes out redundant features)
+        StructField("test_r2", DoubleType(), True),             # Negative: feature is damaging forecast, 0-.15: weak, .15-.4 good performance
         StructField("n_obs", IntegerType(), True),
     ]
 )
@@ -1000,7 +994,6 @@ feature_diagnostics = (
 )
 
 feature_diagnostics.cache()
-display(feature_diagnostics.orderBy(*ACT_GRP_COLS, desc("importance_pct")))
 
 # METADATA ********************
 
@@ -1011,11 +1004,39 @@ display(feature_diagnostics.orderBy(*ACT_GRP_COLS, desc("importance_pct")))
 
 # CELL ********************
 
-display(feature_diagnostics.limit(500))
+w = (
+    Window
+    .partitionBy(*ACT_GRP_COLS)
+    .orderBy(desc('stability_score'), desc('importance'))
+)
+
+selected_features = (
+    feature_diagnostics
+    .filter(
+        (col('abs_coef')!=0) &
+        (col('Feature')!='time_trend')
+    )
+    .withColumn('feature_rank', row_number().over(w))
+    .filter(col('feature_rank')<=10)
+)
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 feature_diagnostics_pdf = feature_diagnostics.toPandas()
 
 feature_diagnostics_pdf.to_excel(feature_diagnostics_file)
 
+
+selected_features_pdf = selected_features.toPandas()
+selected_features_pdf.to_excel(selected_feature_file)
 
 # METADATA ********************
 

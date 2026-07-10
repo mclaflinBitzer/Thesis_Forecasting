@@ -33,9 +33,7 @@ from pyspark.sql.functions import *
 
 # CELL ********************
 
-driver = spark.read.table('Sales_Forecasting.bronze.drv_sector').cache()
-
-display(driver.limit(3))
+data = spark.read.table("Sales_Forecasting.bronze.filtered_data")
 
 # METADATA ********************
 
@@ -46,7 +44,7 @@ display(driver.limit(3))
 
 # CELL ********************
 
-display(driver.orderBy(asc("Value")))
+data.printSchema()
 
 # METADATA ********************
 
@@ -57,9 +55,8 @@ display(driver.orderBy(asc("Value")))
 
 # CELL ********************
 
-display(driver.groupBy('Country').agg(min(col('Date')),max(col('Date'))))
-display(driver.groupBy('Country').agg(min(col('Date')).alias('min_d'),max(col('Date'))
-    .alias('max')).agg(min('min_d'),max('min_d'),min('max'),max('max')))
+middle = data.groupBy('Date','Product_Category').agg(sum('Quantity').alias('Quantity'))
+topline = data.groupBy('Date','Product_Category', 'Region').agg(sum('Quantity').alias('Quantity')) 
 
 # METADATA ********************
 
@@ -70,7 +67,41 @@ display(driver.groupBy('Country').agg(min(col('Date')).alias('min_d'),max(col('D
 
 # CELL ********************
 
-display(driver.select('Indicator').distinct())
+middle_pdf = middle.toPandas()
+middle_pdf.info()
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline_pdf = topline.toPandas()
+topline_pdf.info()
+count_zero = (topline.filter(
+    (col('Quantity')==0) | (col('Quantity').isNull())
+    ).count()
+)
+total_count = topline.count()
+print(count_zero)
+print(total_count)
+print(f"percentage zero {count_zero/total_count}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+raw_data = spark.read.table('Sales_Forecasting.bronze.Raw_Analyse_Sales_BPC')
+
+display(raw_data)
 
 # METADATA ********************
 
