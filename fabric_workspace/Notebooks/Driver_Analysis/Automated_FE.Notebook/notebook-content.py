@@ -791,9 +791,9 @@ id_cols = ACT_GRP_COLS + ["Date"]
 
 MIN_HISTORY = 24          # minimum months of target history required to fit
 TEST_FRAC = 0.2            # holdout fraction, taken from the END (time-respecting)
-N_BOOT = 20                 # bootstrap resamples for stability selection
+N_BOOT = 100                 # bootstrap resamples for stability selection
 BOOT_SAMPLE_FRAC = 0.8
-STABILITY_THRESHOLD = 0.6   # keep features selected in >=60% of bootstraps
+STABILITY_THRESHOLD = 0.8   # keep features selected in >=60% of bootstraps
 MAX_FEATURES_OUT = 10        # cap on final selected features per series
 
 
@@ -835,7 +835,7 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame([{
             **id_vals, "Feature": f, "Coefficient": None, "abs_coef": None,
             "importance": None, "importance_pct": None,
-            "stability_score": None, "selected": 0, "best_alpha": None,
+            "stability_score": None, "best_alpha": None,
             "best_l1_ratio": None, "test_r2": None, "n_obs": len(pdf),
         } for f in cols])
 
@@ -921,6 +921,7 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
             stability_counts += (pd.Series(m.coef_, index=feature_cols) != 0).astype(int)
         except Exception:
             continue
+            
     stability_score = stability_counts / N_BOOT
 
     coefs = pd.Series(model.coef_, index=feature_cols)
@@ -930,7 +931,7 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
         importance = abs_coef/total_abs
     else:
         importance = pd.Series(0.0, index=feature_cols)
-    selected = (stability_score >= STABILITY_THRESHOLD) & (coefs != 0)
+
 
 
     out = pd.DataFrame({
@@ -941,19 +942,13 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
         "importance": importance.values,
         "importance_pct": (importance * 100).values,
         "stability_score": stability_score.values,
-        "selected": selected.astype(int).values,
         "best_alpha": model.alpha_,
         "best_l1_ratio": model.l1_ratio_,
         "test_r2": test_r2,
         "n_obs": len(pdf),
     })
 
-    # cap final selection to top MAX_FEATURES_OUT by |coefficient| among selected
-    out = out.sort_values(["selected","importance"], ascending=[False,False])
-    keep_mask = out["selected"] == 1
-    if keep_mask.sum() > MAX_FEATURES_OUT:
-        drop_idx = out[keep_mask].index[MAX_FEATURES_OUT:]
-        out.loc[drop_idx, "selected"] = 0
+
 
     return out
 
@@ -975,7 +970,6 @@ diagnostics_schema = StructType(
         StructField("importance", DoubleType(), True),
         StructField("importance_pct", DoubleType(), True),
         StructField("stability_score", DoubleType(), True),     # fraction of bootstrap resamples where the feature had a non zero coefficient
-        StructField("selected", IntegerType(), True),
         StructField("best_alpha", DoubleType(), True),          # 0-.03 real signal, .1-1 reasonable signal to noise 3-10 little to no value add from drivers
         StructField("best_l1_ratio", DoubleType(), True),       # 0-.1 Mostly Ridge (keeps correlated features), .9-1 mostly Lasso (zeroes out redundant features)
         StructField("test_r2", DoubleType(), True),             # Negative: feature is damaging forecast, 0-.15: weak, .15-.4 good performance
@@ -1007,17 +1001,19 @@ feature_diagnostics.cache()
 w = (
     Window
     .partitionBy(*ACT_GRP_COLS)
-    .orderBy(desc('stability_score'), desc('importance'))
+    .orderBy(desc('importance'),desc('stability_score'))
 )
 
 selected_features = (
     feature_diagnostics
     .filter(
+        (col('stability_score')>=STABILITY_THRESHOLD) &
         (col('abs_coef')!=0) &
-        (col('Feature')!='time_trend')
+        (col('Feature')!='time_trend') 
     )
     .withColumn('feature_rank', row_number().over(w))
-    .filter(col('feature_rank')<=10)
+    .filter(col('feature_rank')<=15)
+    .select('Feature','Coefficient','importance_pct','stability_score','feature_rank')
 )
 
 
