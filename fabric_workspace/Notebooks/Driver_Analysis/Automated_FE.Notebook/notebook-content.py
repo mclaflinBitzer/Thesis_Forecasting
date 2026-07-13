@@ -60,6 +60,9 @@ T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
 T_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_feature_diagnostics.xlsx"
 T_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_selected_features.xlsx"
 
+T_xgboost_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_xgboost_feature_diagnostics.xlsx"
+T_xgboost_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_xgboost_selected_feature.xlsx"
+
 
 ## MIDDLE
 M_series = ['series']
@@ -77,6 +80,10 @@ M_DRV_COLS_RN = ['feature_region','Indicator']
 M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
 M_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_feature_diagnostics.xlsx"
 M_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_selected_features.xlsx"
+
+M_xgboost_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_feature_diagnostics.xlsx"
+M_xgboost_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_selected_features.xlsx"
+
 
 ## shared
 col_renamed = {"Quantity":"target_value","Value":"feature_value"}
@@ -110,6 +117,8 @@ if Topline:
 
     feature_diagnostics_file = T_feature_diagnostics_file
     selected_feature_file = T_selected_feature_file 
+    xgb_feature_diagnostics_file = T_xgboost_diagnostics_file 
+    xgb_selected_feature_file = T_xgboost_selected_feature_file
 
 else:
     series = M_series 
@@ -128,11 +137,20 @@ else:
     feature_diagnostics_file = M_feature_diagnostics_file
     selected_feature_file = M_selected_feature_file
 
+    xgb_feature_diagnostics_file = M_xgboost_diagnostics_file 
+    xgb_selected_feature_file = M_xgboost_selected_feature_file
+
+
 ## shared
 col_renamed = {"Quantity":"target_value","Value":"feature_value"}
 driver_table = "Sales_Forecasting.silver.compiled_drivers"
 target_col = 'Value'
 
+elasticnet_init_features = 15
+xgboost_init_features = 200
+
+elasticnet_run = False
+xgboost_run = True
 
 # METADATA ********************
 
@@ -627,7 +645,7 @@ ccf_filtered = ccf_filtering(ccf_output, join_cols, series)
 
 # CELL ********************
 
-def top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, num_features):
+def top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS):
     
     ## select the top x features per ACT group & select their ideal lag
     grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
@@ -658,9 +676,9 @@ def top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, num_features):
 
     ccf_filtered = ccf_filtered.withColumn("rank", dense_rank().over(w_a))
 
-    filtered_top = ccf_filtered.filter(col("rank")<=num_features)
 
-    return filtered_top
+
+    return ccf_filtered
 
 # METADATA ********************
 
@@ -672,7 +690,8 @@ def top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, num_features):
 # CELL ********************
 
 DRV_GRP_COLS.append('Feature_name')
-filtered_features = top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, 50).cache()
+
+filtered_features = top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS).cache()
 
 # METADATA ********************
 
@@ -685,7 +704,7 @@ filtered_features = top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS, 50).c
 
 ## melt expanded features to a long format
 
-# the 'melt_cols' are 'grouping cols' or the columns to remain unchanged 
+# the 'melt_cols' are 'grouping cols' with 'Feature_name' removed 
 melt_cols = DRV_GRP_COLS.copy()
 if 'Feature_name' in melt_cols:
     melt_cols.remove("Feature_name")
@@ -712,7 +731,7 @@ expanded_features_long = expanded_features.unpivot(
 print(DRV_GRP_COLS)
 grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
 
-combos = filtered_features.select(*grp_cols, "Lag").distinct()
+combos = filtered_features.select(*grp_cols, "Lag", "rank").distinct()
 
 # combining the actuals original data w/ the filtered features and their identified lags
 # creating the driver_date column which is the actuals data lagged by the features identified lag
@@ -757,7 +776,10 @@ result = (
         join_cond,
         "left"
     ).select("t.*", "f.Feature_value")
-).cache()
+)
+
+results_w_col = result.withColumn('feature_col', concat_ws("__",*DRV_GRP_COLS, col("Lag").cast("string")))
+
 
 # METADATA ********************
 
@@ -978,16 +1000,8 @@ diagnostics_schema = StructType(
 )
 
 
-results_w_col = result.withColumn('feature_col', concat_ws("__",*DRV_GRP_COLS, col("Lag").cast("string")))
 
-feature_diagnostics = (
-    results_w_col
-    .filter(col(target_col).isNotNull())
-    .groupBy(*ACT_GRP_COLS)
-    .applyInPandas(fit_and_select_features, schema=diagnostics_schema)
-)
 
-feature_diagnostics.cache()
 
 # METADATA ********************
 
@@ -998,24 +1012,301 @@ feature_diagnostics.cache()
 
 # CELL ********************
 
-w = (
-    Window
-    .partitionBy(*ACT_GRP_COLS)
-    .orderBy(desc('importance'),desc('stability_score'))
-)
+if elasticnet_run:
 
-selected_features = (
-    feature_diagnostics
-    .filter(
-        (col('stability_score')>=STABILITY_THRESHOLD) &
-        (col('abs_coef')!=0) &
-        (col('Feature')!='time_trend') 
+    results_elasticnet = results_w_col.filter(col('rank')<=elasticnet_init_features).drop('rank')
+
+    feature_diagnostics = (
+        results_elasticnet
+        .filter(col(target_col).isNotNull())
+        .groupBy(*ACT_GRP_COLS)
+        .applyInPandas(fit_and_select_features, schema=diagnostics_schema)
     )
-    .withColumn('feature_rank', row_number().over(w))
-    .filter(col('feature_rank')<=15)
-    .select('Feature','Coefficient','importance_pct','stability_score','feature_rank')
+
+    feature_diagnostics.cache()
+
+    w = (
+        Window
+        .partitionBy(*ACT_GRP_COLS)
+        .orderBy(desc('importance'),desc('stability_score'))
+    )
+
+    selected_features = (
+        feature_diagnostics
+        .filter(
+            (col('stability_score')>=STABILITY_THRESHOLD) &
+            (col('abs_coef')!=0) &
+            (col('Feature')!='time_trend') 
+        )
+        .withColumn('feature_rank', row_number().over(w))
+        .filter(col('feature_rank')<=15)
+        .select('Feature','Coefficient','importance_pct','stability_score','feature_rank')
+    )
+
+
+    feature_diagnostics_pdf = feature_diagnostics.toPandas()
+
+    feature_diagnostics_pdf.to_excel(feature_diagnostics_file)
+
+
+    selected_features_pdf = selected_features.toPandas()
+    selected_features_pdf.to_excel(selected_feature_file)
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## XGBOOST Feature Selection
+
+# CELL ********************
+
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.inspection import permutation_importance
+from sklearn.metrics import r2_score
+import xgboost as xgb
+import pandas as pd
+import numpy as np
+import builtins
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# ============================================================
+# CONFIG
+# ============================================================
+MIN_HISTORY = 24
+TEST_FRAC = 0.2
+N_BOOT = 30                    # bootstrap resamples for stability selection
+BOOT_SAMPLE_FRAC = 0.8
+STABILITY_THRESHOLD = 0.6
+MAX_FEATURES_OUT = 25
+PERM_REPEATS = 30              # repeats for permutation importance
+
+# structural controls — absorb trend/seasonality so driver importances aren't
+# penalized for failing to explain target movement they were never suited to explain
+CONTROL_COLS = ["time_trend", "y_lag1", "y_lag12"]
+
+# XGBoost hyperparameter grid — small, deliberately conservative given short series
+XGB_PARAM_GRID = [
+    {"max_depth": 2, "learning_rate": 0.05, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
+    {"max_depth": 3, "learning_rate": 0.05, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
+    {"max_depth": 3, "learning_rate": 0.1,  "n_estimators": 100, "subsample": 0.7, "colsample_bytree": 0.7},
+    {"max_depth": 4, "learning_rate": 0.05, "n_estimators": 150, "subsample": 0.8, "colsample_bytree": 0.6},
+]
+
+
+# ============================================================
+# OUTPUT SCHEMA
+# ============================================================
+xgb_diagnostics_schema = StructType(
+    [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
+    [
+        StructField("Feature", StringType(), False),
+        StructField("importance_gain", DoubleType(), True),      # split-quality based
+        StructField("importance_perm", DoubleType(), True),      # permutation based (primary)
+        StructField("importance_perm_std", DoubleType(), True),
+        StructField("importance_pct", DoubleType(), True),
+        StructField("stability_score", DoubleType(), True),
+        StructField("selected", IntegerType(), True),
+        StructField("is_control", IntegerType(), False),
+        StructField("best_max_depth", IntegerType(), True),
+        StructField("best_learning_rate", DoubleType(), True),
+        StructField("best_n_estimators", IntegerType(), True),
+        StructField("test_r2", DoubleType(), True),
+        StructField("controls_only_r2", DoubleType(), True),
+        StructField("naive_r2", DoubleType(), True),
+        StructField("drivers_add_value", IntegerType(), True),
+        StructField("n_obs", IntegerType(), True),
+    ]
 )
 
+# ============================================================
+# CORE FIT FUNCTION — one XGBoost model per ACT_GRP_COLS group
+# ============================================================
+def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
+    pdf = pdf.sort_values("Date").reset_index(drop=True)
+    id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
+
+    # ---- pivot long -> wide, one row per Date ----
+    wide = (
+        pdf.pivot_table(index=["Date", target_col], columns="feature_col",
+                         values="Feature_value", aggfunc="first")
+        .reset_index()
+    )
+
+    driver_cols = [c for c in wide.columns if c not in ["Date", target_col]]
+
+    # ---- structural controls ----
+    wide["time_trend"] = np.arange(len(wide))
+    wide["y_lag1"] = wide[target_col].shift(1)
+    wide["y_lag12"] = wide[target_col].shift(12)
+    wide = wide.dropna(subset=["y_lag12"]).reset_index(drop=True)
+
+
+    feature_cols = driver_cols + CONTROL_COLS
+
+    def empty_result(cols=None, n_obs=0):
+        cols = feature_cols if cols is None else cols
+        return pd.DataFrame([{
+            **id_vals, "Feature": f,
+            "importance_gain": None, "importance_perm": None, "importance_perm_std": None,
+            "importance_pct": None, "stability_score": None, "selected": 0,
+            "is_control": int(f in CONTROL_COLS),
+            "best_max_depth": None, "best_learning_rate": None, "best_n_estimators": None,
+            "test_r2": None, "controls_only_r2": None, "naive_r2": None,
+            "drivers_add_value": None, "n_obs": n_obs,
+        } for f in cols])
+
+    if len(wide) < MIN_HISTORY or len(driver_cols) == 0:
+        return empty_result(feature_cols, len(wide))
+
+    X = wide[feature_cols].apply(pd.to_numeric, errors="coerce")
+    y = pd.to_numeric(wide[target_col], errors="coerce")
+
+    valid = y.notna()
+    X, y = X.loc[valid].reset_index(drop=True), y.loc[valid].reset_index(drop=True)
+
+    if len(y) < MIN_HISTORY:
+        return empty_result(feature_cols, len(wide))
+
+    # ---- time-respecting split ----
+    split_idx = int(len(y) * (1 - TEST_FRAC))
+    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+
+    if len(y_train) < 12 or len(y_test) < 3:
+        return empty_result(feature_cols, len(wide))
+
+    # ---- median impute from TRAIN only (no leakage) ----
+    medians = X_train.median()
+    #medians = medians.fillna(0)
+    X_train = X_train.fillna(medians)
+    X_test = X_test.fillna(medians)
+
+    # ---- hyperparameter search via TimeSeriesSplit CV ----
+    n_splits = builtins.min(5, builtins.max(2, len(y_train) // 12))
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+
+    best_score, best_params = -np.inf, None
+    for params in XGB_PARAM_GRID:
+        fold_scores = []
+        for tr_idx, val_idx in tscv.split(X_train):
+            X_tr, X_val = X_train.iloc[tr_idx], X_train.iloc[val_idx]
+            y_tr, y_val = y_train.iloc[tr_idx], y_train.iloc[val_idx]
+            try:
+                m = xgb.XGBRegressor(
+                    objective="reg:squarederror", random_state=42,
+                    n_jobs=1,  # avoid nested parallelism fighting Spark's own executor threads
+                    **params
+                ).fit(X_tr, y_tr)
+                fold_scores.append(m.score(X_val, y_val))
+            except Exception:
+                fold_scores.append(-np.inf)
+        mean_score = np.mean(fold_scores)
+        if mean_score > best_score:
+            best_score, best_params = mean_score, params
+
+    if best_params is None:
+        return empty_result(feature_cols, len(wide))
+
+    # ---- fit final model on full training set with best params ----
+    try:
+        model = xgb.XGBRegressor(
+            objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
+        ).fit(X_train, y_train)
+    except Exception:
+        return empty_result(feature_cols, len(wide))
+
+    test_r2 = model.score(X_test, y_test)
+    naive_r2 = r2_score(y_test, np.full_like(y_test, y_train.mean(), dtype=float))
+
+    # ---- controls-only baseline: isolates drivers' marginal contribution ----
+    ctrl_model = xgb.XGBRegressor(
+        objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
+    ).fit(X_train[CONTROL_COLS], y_train)
+    controls_only_r2 = ctrl_model.score(X_test[CONTROL_COLS], y_test)
+    drivers_add_value = int(test_r2 > controls_only_r2)
+
+    # ---- gain-based importance (fast, built-in, but biased toward high-cardinality splits) ----
+    gain_importance = pd.Series(model.feature_importances_, index=feature_cols)
+
+    # ---- permutation importance on TEST set (primary metric — unbiased, model-agnostic) ----
+    perm = permutation_importance(
+        model, X_test, y_test, n_repeats=PERM_REPEATS, random_state=42, n_jobs=1
+    )
+    perm_importance = pd.Series(perm.importances_mean, index=feature_cols).clip(lower=0)
+    perm_importance_std = pd.Series(perm.importances_std, index=feature_cols)
+
+    total_perm = perm_importance.sum()
+    importance_pct = (perm_importance / total_perm * 100) if total_perm > 0 else perm_importance * 0
+
+    # ---- bootstrap stability selection ----
+    stability_counts = pd.Series(0, index=feature_cols, dtype=float)
+    for _ in range(N_BOOT):
+        boot_idx = X_train.sample(frac=BOOT_SAMPLE_FRAC, replace=True).index
+        try:
+            m = xgb.XGBRegressor(
+                objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
+            ).fit(X_train.loc[boot_idx], y_train.loc[boot_idx])
+            boot_perm = permutation_importance(
+                m, X_test, y_test, n_repeats=10, random_state=42, n_jobs=1
+            )
+            # a feature "counts" this round if its permutation importance is meaningfully > 0
+            stability_counts += (pd.Series(boot_perm.importances_mean, index=feature_cols) > 1e-6).astype(int)
+        except Exception:
+            continue
+    stability_score = stability_counts / N_BOOT
+
+    selected = (
+        (stability_score >= STABILITY_THRESHOLD) &
+        (perm_importance > 0) &
+        (~pd.Series(feature_cols, index=feature_cols).isin(CONTROL_COLS))  # controls never "selected"
+        #&   drivers_add_value  # series-level gate: only trust selection if drivers beat controls-only
+    )
+
+    out = pd.DataFrame({
+        **{c: id_vals[c] for c in ACT_GRP_COLS},
+        "Feature": feature_cols,
+        "importance_gain": gain_importance.values,
+        "importance_perm": perm_importance.values,
+        "importance_perm_std": perm_importance_std.values,
+        "importance_pct": importance_pct.values,
+        "stability_score": stability_score.values,
+        "selected": selected.astype(int).values,
+        "is_control": [int(f in CONTROL_COLS) for f in feature_cols],
+        "best_max_depth": best_params["max_depth"],
+        "best_learning_rate": best_params["learning_rate"],
+        "best_n_estimators": best_params["n_estimators"],
+        "test_r2": test_r2,
+        "controls_only_r2": controls_only_r2,
+        "naive_r2": naive_r2,
+        "drivers_add_value": int(drivers_add_value),
+        "n_obs": len(wide),
+    })
+
+    # cap selected drivers at MAX_FEATURES_OUT, ranked by importance_pct
+    out = out.sort_values(["selected", "importance_pct"], ascending=[False, False])
+    keep_mask = out["selected"] == 1
+    if keep_mask.sum() > MAX_FEATURES_OUT:
+        drop_idx = out[keep_mask].index[MAX_FEATURES_OUT:]
+        out.loc[drop_idx, "selected"] = 0
+
+    return out
+
+
 
 # METADATA ********************
 
@@ -1026,74 +1317,33 @@ selected_features = (
 
 # CELL ********************
 
-feature_diagnostics_pdf = feature_diagnostics.toPandas()
+if xgboost_run:
+    # ============================================================
+    # RUN — distributed across Spark executors, one fit per series
+    # ============================================================
 
-feature_diagnostics_pdf.to_excel(feature_diagnostics_file)
-
-
-selected_features_pdf = selected_features.toPandas()
-selected_features_pdf.to_excel(selected_feature_file)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# selected_features = (
-#     feature_diagnostics
-#     .filter(col("selected") == 1)
-#     .select(*ACT_GRP_COLS, "Feature")
-# )
-
-# # long format: one row per (series, Date, selected Feature, its value)
-# feature_matrix_long = melt_features_long(  # reuse your existing melt helper, or:
-#     feature_matrix, ACT_GRP_COLS, feature_cols
-# ) if 'melt_features_long' in dir() else (
-#     feature_matrix.select(
-#         *ACT_GRP_COLS, "Date", target_col,
-#         expr(f"stack({len(feature_cols)}, " +
-#              ", ".join(f"'{c}', `{c}`" for c in feature_cols) +
-#              ") as (Feature, Feature_value)")
-#     )
-# )
-
-# # keep only rows whose Feature was selected for that specific series
-# trimmed_long = feature_matrix_long.join(
-#     selected_features, [*ACT_GRP_COLS, "Feature"], "inner"
-# )
-
-# # pivot back to wide — final downstream-model-ready matrix
-# final_feature_matrix = (
-#     trimmed_long
-#     .groupBy(*ACT_GRP_COLS, "Date", target_col)
-#     .pivot("Feature")
-#     .agg(first("Feature_value"))
-# )
-
-# display(final_feature_matrix.limit(50))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
+    results_xgb = results_w_col.filter(col('rank')<=xgboost_init_features).drop('rank')
 
 
-# METADATA ********************
+    xgb_feature_diagnostics = (
+        results_xgb
+        .filter(col(target_col).isNotNull())
+        .groupBy(*ACT_GRP_COLS)
+        .applyInPandas(fit_xgb_feature_importance, schema=xgb_diagnostics_schema)
+    )
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+    xgb_feature_diagnostics.cache()
+    display(xgb_feature_diagnostics.orderBy(*ACT_GRP_COLS, desc("importance_pct")))
 
-# CELL ********************
+    xgb_selected_features = xgb_feature_diagnostics.filter(col('selected')==1).orderBy(*ACT_GRP_COLS,desc('importance_pct'))
+
+    xgb_feature_diagnostics_pdf = xgb_feature_diagnostics.toPandas()
+
+    xgb_feature_diagnostics_pdf.to_excel(xgb_feature_diagnostics_file)
+
+
+    xgb_selected_features_pdf = xgb_selected_features.toPandas()
+    xgb_selected_features_pdf.to_excel(xgb_selected_feature_file)
 
 
 # METADATA ********************
