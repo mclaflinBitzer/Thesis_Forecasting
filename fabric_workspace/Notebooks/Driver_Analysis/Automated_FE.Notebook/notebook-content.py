@@ -41,183 +41,13 @@ from functools import reduce
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# MARKDOWN ********************
 
-## TOPLINE
-T_series = ['series']
-T_DRV_GRP_COLS = ['Indicator']
-T_ACT_GRP_COLS = ['Product_Category','series']
-
-T_cols = T_ACT_GRP_COLS + T_DRV_GRP_COLS
-
-T_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
-T_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-
-T_ACT_COLS_RN = ['Product_Category', 'series']
-T_DRV_COLS_RN = ['Indicator']
-
-T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
-T_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_feature_diagnostics.xlsx"
-T_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_selected_features.xlsx"
-
-T_xgboost_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_xgboost_feature_diagnostics.xlsx"
-T_xgboost_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/topline_xgboost_selected_feature.xlsx"
-
-
-## MIDDLE
-M_series = ['series']
-M_DRV_GRP_COLS = ['Region','Indicator']
-M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
-
-M_cols = M_ACT_GRP_COLS + M_DRV_GRP_COLS
-
-M_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual","Region":"target_region"}  
-M_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual","Region":"feature_region"}
-
-M_ACT_COLS_RN = ['Product_Category', 'target_region', 'series']
-M_DRV_COLS_RN = ['feature_region','Indicator']
-
-M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
-M_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_feature_diagnostics.xlsx"
-M_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_selected_features.xlsx"
-
-M_xgboost_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_feature_diagnostics.xlsx"
-M_xgboost_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_selected_features.xlsx"
-
-
-## shared
-col_renamed = {"Quantity":"target_value","Value":"feature_value"}
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-Topline = True
-
-if Topline:
-    series = T_series
-    DRV_GRP_COLS = T_DRV_GRP_COLS 
-    ACT_GRP_COLS = T_ACT_GRP_COLS 
-
-    level_cols = list(dict.fromkeys(T_cols)) 
-    actuals_table = T_actuals_table 
-
-    ACT_COLS_RENAME = T_ACT_COLS_RENAME
-    DRV_COLS_RENAME = T_DRV_COLS_RENAME
-
-    ACT_COLS_RN = T_ACT_COLS_RN
-    DRV_COLS_RN = T_DRV_COLS_RN
-
-    feature_diagnostics_file = T_feature_diagnostics_file
-    selected_feature_file = T_selected_feature_file 
-    xgb_feature_diagnostics_file = T_xgboost_diagnostics_file 
-    xgb_selected_feature_file = T_xgboost_selected_feature_file
-
-else:
-    series = M_series 
-    DRV_GRP_COLS = M_DRV_GRP_COLS 
-    ACT_GRP_COLS = M_ACT_GRP_COLS 
-
-    level_cols = list(dict.fromkeys(M_cols))
-    actuals_table = M_actuals_table
-
-    ACT_COLS_RENAME = M_ACT_COLS_RENAME
-    DRV_COLS_RENAME = M_DRV_COLS_RENAME
-
-    ACT_COLS_RN = M_ACT_COLS_RN
-    DRV_COLS_RN = M_DRV_COLS_RN
-
-    feature_diagnostics_file = M_feature_diagnostics_file
-    selected_feature_file = M_selected_feature_file
-
-    xgb_feature_diagnostics_file = M_xgboost_diagnostics_file 
-    xgb_selected_feature_file = M_xgboost_selected_feature_file
-
-
-## shared
-col_renamed = {"Quantity":"target_value","Value":"feature_value"}
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
-target_col = 'Value'
-
-elasticnet_init_features = 15
-xgboost_init_features = 200
-
-elasticnet_run = False
-xgboost_run = True
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# ## Data Processing / Prep Methods
 
 # MARKDOWN ********************
 
-# #### Reading Data
-
-# CELL ********************
-
-# ORIGINAL / BASE LEVEL DRIVERS
-compiled_drivers = spark.read.table(driver_table).select("Country","Indicator","Region","Date","Value")
-
-# ACTUALS TABLE
-data = spark.read.table(actuals_table).filter(col('Product_Category').isin('ALU',"SCREWS"))
-## aggregating based on the ACT GRP COLS defined
-data = data.groupBy(*ACT_GRP_COLS,"Date").agg(sum("Quantity").alias("Quantity"))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# #### Driver Processing
-
-# CELL ********************
-
-## Aggregating the drivers based upon the DRV GRP COLS defined 
-aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
-
-# if Indicator is the only value in DRV GRP COLS then the data will be aggregated at a lower level than world
-    # this ensures that "WORLD" level aggregated drivers are added to the aggregated_drivers set
-
-if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
-    # creates world level drivers
-    world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
-    
-    # populates the other DRV GRP COLS defined that aren't "Indicator" with the value of "World"
-    for cols in DRV_GRP_COLS:
-        if cols!='Indicator':
-            world_agg = world_agg.withColumn(cols, lit("World"))
-            print(f"{cols} added using .withColumn, populated with lit(World)")
-
-    aggregated_drivers = aggregated_drivers.unionByName(world_agg)
-    
-else:
-    print('world agg already done')
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# MARKDOWN ********************
-
-# #### Feature Engineering / Expansion
+# #### FE / Expansion
 
 # CELL ********************
 
@@ -274,31 +104,9 @@ def feature_engineering(df, drv_grp_cols):
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
-
-# applying feature_engineeringh method in order to expand the feature set
-expanded_features = feature_engineering(aggregated_drivers, DRV_GRP_COLS).cache()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
-# ### Classical Feature Processing
-# - STL residual application
-# - correlation analysis
-# -- filter out low / too high correlations
-# - ccf w/ lag identification
-# - Elastic Net selection
-#         
-#         - scale data for elastic net
-#         - select features based output per target series
-# 
-# - Finalize prior to Model ingestion
+# #### STL Decompose
 
 # CELL ********************
 
@@ -321,6 +129,10 @@ def stl_decompose(pdf: pd.DataFrame) -> pd.DataFrame:
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
+
+# MARKDOWN ********************
+
+# #### Reformatting Data 
 
 # CELL ********************
 
@@ -364,47 +176,9 @@ def reformatting_data(df, drv_grp_cols):
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# MARKDOWN ********************
 
-reformatted_df = reformatting_data(expanded_features, DRV_GRP_COLS)
-
-
-## FEATURE RESIDUALS
-
-feature_stl_schema = StructType([
-    StructField("Feature", StringType(), False),
-    StructField("Date", DateType(), False),
-    StructField("Value", DoubleType(), True),
-    StructField("residual", DoubleType(), True)
-])
-
-feature_residuals = reformatted_df.groupBy("Feature").applyInPandas(stl_decompose, schema=feature_stl_schema)
-
-
-
-## DATA RESIDUALS
-
-data_stl_schema = StructType(
-    [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
-    [
-        StructField("Date", DateType(), False),
-        StructField("Value", DoubleType(), True),
-        StructField("residual", DoubleType(), True)
-    ]
-
-)
-
-## renaming quantity col of actuals to 'value' for stl processing 
-data = data.withColumnRenamed("Quantity","Value")
-
-data_residuals = data.groupBy(*ACT_GRP_COLS).applyInPandas(stl_decompose, schema=data_stl_schema)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# #### Join target
 
 # CELL ********************
 
@@ -461,6 +235,10 @@ def join_target_feature(
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
+
+# MARKDOWN ********************
+
+# #### Apply CCF
 
 # CELL ********************
 
@@ -525,6 +303,10 @@ def apply_ccf(df):
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# #### CCF Filtering
+
 # CELL ********************
 
 def ccf_filtering(df, cols, serie_col):
@@ -571,75 +353,9 @@ def ccf_filtering(df, cols, serie_col):
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# MARKDOWN ********************
 
-## APPLICATION OF CCF 
-
-split_col = split(col("Feature"), "__")
-feature_serie_cols = DRV_GRP_COLS + ['Feature_name']
-
-for i, c in enumerate(feature_serie_cols):
-    feature_residuals = feature_residuals.withColumn(c, split_col.getItem(i))
-
-
-
-
-## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
-data_distinct = data_residuals.select(*ACT_GRP_COLS).distinct()
-drv_distinct = feature_residuals.select(*feature_serie_cols).distinct()
-
-
-
-join_col = []
-for a_col in ACT_GRP_COLS:
-    for d_col in feature_serie_cols:
-        if a_col == d_col:
-            join_col.append(d_col)
-            print(f"{d_col} added to join col list")
-
-if len(join_col) == 0:
-    print("no shared columns so cross join was done")
-    pairs = data_distinct.crossJoin(drv_distinct)
-else:
-    print(f"shared columns so the join was done on {join_col}")
-    pairs = data_distinct.join(drv_distinct, join_col, 'inner')
-
-
-if len(ACT_GRP_COLS) == 0:
-    data_expanded = data_residuals.crossJoin(broadcast(pairs))
-else:
-    data_expanded = data_residuals.join(broadcast(pairs), [*ACT_GRP_COLS], 'inner')
-
-
-features_expanded = broadcast(pairs).join(feature_residuals, [*feature_serie_cols], 'inner')
-
-
-join_cols = list(dict.fromkeys(ACT_GRP_COLS + feature_serie_cols))
-
-joined_data_features = join_target_feature(
-    data_expanded, features_expanded, join_cols
-)
-
-ccf_schema = StructType(
-    [StructField(c, StringType(), False) for c in join_cols] +
-    [
-        StructField("Lag", IntegerType(), False),
-        StructField("Correlation", DoubleType(), True),
-        StructField('coverage', DoubleType(), True),
-        StructField('n_overlap', IntegerType(), False)
-    ]
-)
-
-ccf_output = joined_data_features.groupBy(join_cols).applyInPandas(apply_ccf, schema=ccf_schema)
-
-ccf_filtered = ccf_filtering(ccf_output, join_cols, series)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# #### Corr Clustering
 
 # CELL ********************
 
@@ -706,265 +422,17 @@ def corr_clustering(df):
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# MARKDOWN ********************
 
-joined_data_features.cache()
-ccf_filtered.cache()
-display(joined_data_features.limit(3))
-display(ccf_filtered.limit(3))
-DRV_GRP_COLS.append('Feature_name')
-print(DRV_GRP_COLS)
-print(ACT_GRP_COLS)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# #### Top Feature Extraction
 
 # CELL ********************
 
-df_f_resid = joined_data_features
-df_ccf_filtered = ccf_filtered
-
-grp_cols = DRV_GRP_COLS
-act_cols = ACT_GRP_COLS
-
-df_f_resid = df_f_resid.withColumn("feature_serie", concat_ws("__", *grp_cols)).withColumnRenamed('Date','target_date')
-
-df_ccf_filtered = df_ccf_filtered.withColumn("feature_serie", concat_ws("__", *grp_cols))
-
-
-## creating the feature_id for the feature/serie combinations that persisted after filtering
-feature_series = df_ccf_filtered.select("feature_serie").distinct()
-feature_series = feature_series.withColumn("feature_id", row_number().over(Window.orderBy("feature_serie")))
-
-## ensuring there is no ambiguity in the joins
-
-r = df_f_resid.alias("r")
-
-initial_joined_df = feature_series.join(df_ccf_filtered, ["feature_serie"], "left").drop('Feature_name','Indicator')
-joined_df = initial_joined_df.join(r, ['feature_serie',*act_cols], 'inner')
-    # .drop(*[col(f"r.{c}") for c in grp_cols])\
-    # .select(*grp_cols, *[col(f"r.{c}") for c in r.columns if c in act_cols if c not in grp_cols + ["feature_serie"]], "target_date", "feature_id", "feature_residual" )
-
-
-schema = StructType(
-    [StructField(c, StringType(), False) for c in grp_cols] +
-    [
-        StructField("feature_id", IntegerType(), False),
-        StructField("cluster", IntegerType(), False)
-    ]
-)
-
-
-# clustering = joined_df.select(*act_cols, *grp_cols, 'target_date','feature_id','feature_residual').groupBy(*act_cols).applyInPandas(corr_clustering, schema=schema)
-# display(clustering)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-df = joined_df.select(*act_cols, *grp_cols, 'target_date','feature_id','feature_residual').filter(col('Product_Category')=='ALU').toPandas()
-display(df.head(1))
-
-# grouping columns are whatever isn't a measure
-group_cols = [
-    c for c in df.columns
-    if c not in [
-        "target_date",
-        "feature_id",
-        "feature_residual"
-    ]
-]
-
-group_cols
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-def corr_clustering(df):
-
-
-    group_values = {
-        c: df[c].iloc[0]
-        for c in group_cols
-    }
-
-    wide_df = (
-        df.pivot_table(
-            index=group_cols + ["target_date"],
-            columns="feature_id",
-            values="feature_residual",
-            aggfunc="first"
-        )
-        .reset_index()
-    )
-
-    X = (
-        wide_df
-        .drop(columns=group_cols + ["target_date"])
-        .select_dtypes(include=[np.number])
-        .fillna(0)
-    )
-
-    corr = X.corr().abs().fillna(0)
-    distance = 1 - corr
-
-    linkage = sch.linkage(
-        squareform(distance.values, checks=False),
-        method="average"
-    )
-
-    labels = sch.fcluster(
-        linkage,
-        t=0.2,
-        criterion="distance"
-    )
-
-    cluster_map = pd.DataFrame({
-        **group_values,
-        "feature_id": X.columns,
-        "cluster": labels
-    })
-
-    return cluster_map
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-
-
-
-
-
-ij = initial_joined_df.alias("ij")
-c_df = clustering.alias("c")
-    
-conditions = []
-
-for col_nam in act_cols:
-    # Automatically map target_* -> feature_*
-    conditions.append(
-        col(f"ij.{col_nam}") == col(f"c.{col_nam}")
-    )
-# Always join on the dates
-conditions.append(
-    col(f"ij.feature_id") ==
-    col(f"c.feature_id")
-)
-
-join_cond = reduce(operator.and_, conditions)
-
-data_w_cluster = ij.join(
-    c_df,
-    join_cond, 'inner'
-).select(*[col(f"ij.{c}") for c in ij.columns],c_df['cluster'])
-
-if 'series' in grp_cols:
-    cluster_corr_w = Window.partitionBy("series", "cluster").orderBy(desc("max_corr"))
-
-    data_distinct = data_w_cluster.select("series","feature_id","cluster","max_corr").distinct()
-
-    data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
-
-    data_filtered = data_distinct.filter(col("cluster_rank")<=3)
-
-    ## joining remaining features w/ original data
-    df = data_filtered.alias('df')
-
-    post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['series'],df['max_corr'])
-
-    ## ranking series within clusters
-    ranked_w = Window. partitionBy("series").orderBy(desc('max_corr'))
-
-    post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
-
-else:
-    cluster_corr_w = Window.partitionBy("cluster").orderBy(desc("max_corr"))
-
-    data_distinct = data_w_cluster.select("feature_id","cluster","max_corr").distinct()
-
-    data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
-
-    data_filtered = data_distinct.filter(col("cluster_rank")<=3)
-
-    ## joining remaining features w/ original data
-    df = data_filtered.alias('df')
-
-    post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['max_corr'])
-
-    ## ranking w/o series within clusters
-    ranked_w = Window.orderBy(desc('max_corr'))
-
-    post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))    
-
-
-
-## select the top x features per ACT group & select their ideal lag
-grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
-
-## create rec_lag flag and stable flag
-w = Window.partitionBy(*grp_cols).orderBy("Lag").rowsBetween(-1,1)
-ccf_filtered = (
-    ccf_filtered
-    .withColumn("rec_lag", when(col("abs_corr")==col("max_corr"), lit(1)).otherwise(lit(0)))
-    .withColumn("rolling_corr_avg", mean(col("Correlation")).over(w))
-    .withColumn("rolling_corr_std", stddev(col("Correlation")).over(w))
-    .withColumn("stable_flag",
-        when(
-            (col("Correlation") >= col("rolling_corr_avg") - col("rolling_corr_std")) &
-            (col("Correlation") <= col("rolling_corr_avg") + col("rolling_corr_std")),
-            lit(1)
-        ).otherwise(lit(0))
-    )
-)
-
-## filtering for only records with the rec lag and stable period flags as true
-ccf_filtered = ccf_filtered.filter(
-    (col("rec_lag")==1) & (col("stable_flag")==1)
-)
-
-
-w_a = Window.partitionBy(*ACT_GRP_COLS).orderBy(desc("max_corr"))
-
-ccf_filtered = ccf_filtered.withColumn("rank", dense_rank().over(w_a))
-
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-def top_features(df_f_resid, ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS):
+def top_x_feature_extraction(df_f_resid, df_ccf_filtered, grp_cols, act_cols):
     df_f_resid = df_f_resid.withColumn("feature_serie", concat_ws("__", *grp_cols))
 
     df_ccf_filtered = df_ccf_filtered.withColumn("feature_serie", concat_ws("__", *grp_cols))
+
 
     ## creating the feature_id for the feature/serie combinations that persisted after filtering
     feature_series = df_ccf_filtered.select("feature_serie").distinct()
@@ -990,6 +458,7 @@ def top_features(df_f_resid, ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS):
     )
 
     clustering = joined_df.groupBy(*act_cols).applyInPandas(corr_clustering, schema=schema)
+
 
 
     ij = initial_joined_df.alias("ij")
@@ -1053,140 +522,687 @@ def top_features(df_f_resid, ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS):
 
         post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))    
 
+    top_x_features = post_cluster_filtering.select(*grp_cols,"Lag","Correlation","abs_corr","max_corr","feature_rank")
 
 
-    ## select the top x features per ACT group & select their ideal lag
-    grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
+    top_x_features = top_x_features.withColumn("rec_lag", 
+        when(col("abs_corr")==col("max_corr"),lit(1)).otherwise(lit(0)))
 
-    ## create rec_lag flag and stable flag
+
+    top_x_features = top_x_features
     w = Window.partitionBy(*grp_cols).orderBy("Lag").rowsBetween(-1,1)
-    ccf_filtered = (
-        ccf_filtered
-        .withColumn("rec_lag", when(col("abs_corr")==col("max_corr"), lit(1)).otherwise(lit(0)))
-        .withColumn("rolling_corr_avg", mean(col("Correlation")).over(w))
-        .withColumn("rolling_corr_std", stddev(col("Correlation")).over(w))
+
+    top_x_features = top_x_features\
+        .withColumn('rolling_corr_avg', mean(col("Correlation")).over(w))\
+        .withColumn('rolling_corr_std', stddev(col("Correlation")).over(w))\
         .withColumn("stable_flag",
             when(
                 (col("Correlation") >= col("rolling_corr_avg") - col("rolling_corr_std")) &
                 (col("Correlation") <= col("rolling_corr_avg") + col("rolling_corr_std")),
                 lit(1)
             ).otherwise(lit(0))
+            )
+
+
+
+    return top_x_features
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### Correlation Calc Method for DL workflow
+
+# CELL ********************
+
+import builtins
+## CORRELATION CALC METHOD FOR DL PROCESS
+def dl_calc_corr(pdf):
+
+    # Save group keys first
+    out = {
+        **{c: pdf[c].iloc[0] for c in ACT_GRP_COLS},
+        **{c: pdf[c].iloc[0] for c in DRV_GRP_COLS},
+    }
+
+    pdf = (
+        pdf.sort_values("Date")
+           .dropna(subset=["target_residual", "feature_residual"])
+    )
+
+    if len(pdf) < 3:
+        out["Correlation"] = None
+        out["Lag"] = None
+        return pd.DataFrame([out])
+
+    target = pdf["target_residual"].reset_index(drop=True)
+    feature = pdf["feature_residual"].reset_index(drop=True)
+
+    best_corr = None
+    best_abs_corr = -1
+    best_lag = None
+
+    for lag in range(13):
+
+        corr = target.corr(feature.shift(lag))
+
+        if pd.notna(corr) and builtins.abs(corr) > best_abs_corr:
+            best_corr = corr
+            best_abs_corr = builtins.abs(corr)
+            best_lag = lag
+
+    out["Correlation"] = best_corr
+    out["Lag"] = best_lag
+
+    return pd.DataFrame([out])
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+## BASE DIRECTORY FOR ALL OUTPUTS
+excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
+
+
+## TOPLINE
+T_series = ['series']
+T_initial_target_col = "Quantity"
+
+T_DRV_GRP_COLS = ['Indicator']
+T_ACT_GRP_COLS = ['Product_Category','series']
+
+T_cols = list(dict.fromkeys(T_ACT_GRP_COLS + T_DRV_GRP_COLS))
+
+T_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
+T_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+
+
+T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
+T_feature_diagnostics_file = excel_base_dir + "topline_feature_diagnostics.xlsx"
+T_selected_feature_file = excel_base_dir + "topline_selected_features.xlsx"
+
+T_xgboost_diagnostics_file = excel_base_dir + "topline_xgboost_feature_diagnostics.xlsx"
+T_xgboost_selected_feature_file = excel_base_dir + "topline_xgboost_selected_feature.xlsx"
+
+T_dl_selected_feature_file = excel_base_dir + "topline_dl_selected_feature.xlsx"
+
+
+## MIDDLE
+M_series = ['series']
+M_initial_target_col = 'Quantity'
+
+M_DRV_GRP_COLS = ['Region','Indicator']
+M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
+
+M_cols = list(dict.fromkeys(M_ACT_GRP_COLS + M_DRV_GRP_COLS))
+
+M_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
+M_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+
+
+M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
+M_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_feature_diagnostics.xlsx"
+M_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_selected_features.xlsx"
+
+M_xgboost_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_feature_diagnostics.xlsx"
+M_xgboost_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_selected_features.xlsx"
+
+M_dl_selected_feature_file = excel_base_dir + "middle_dl_selected_feature.xlsx"
+
+
+## shared
+col_renamed = {"Quantity":"target_value","Value":"feature_value"}
+driver_table = "Sales_Forecasting.silver.compiled_drivers"
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+Topline = True
+
+if Topline:
+    series = T_series
+    initial_target_col = T_initial_target_col
+
+    DRV_GRP_COLS = T_DRV_GRP_COLS 
+    ACT_GRP_COLS = T_ACT_GRP_COLS 
+
+    level_cols = list(dict.fromkeys(T_cols)) 
+    actuals_table = T_actuals_table 
+
+    ACT_COLS_RENAME = T_ACT_COLS_RENAME
+    DRV_COLS_RENAME = T_DRV_COLS_RENAME
+
+    feature_diagnostics_file = T_feature_diagnostics_file
+    selected_feature_file = T_selected_feature_file 
+    xgb_feature_diagnostics_file = T_xgboost_diagnostics_file 
+    xgb_selected_feature_file = T_xgboost_selected_feature_file
+    dl_selected_feature_file = T_dl_selected_feature_file
+
+else:
+    series = M_series 
+    inital_target_col = M_initial_target_col
+
+    DRV_GRP_COLS = M_DRV_GRP_COLS 
+    ACT_GRP_COLS = M_ACT_GRP_COLS 
+
+    level_cols = list(dict.fromkeys(M_cols))
+    actuals_table = M_actuals_table
+
+    ACT_COLS_RENAME = M_ACT_COLS_RENAME
+    DRV_COLS_RENAME = M_DRV_COLS_RENAME
+
+
+    feature_diagnostics_file = M_feature_diagnostics_file
+    selected_feature_file = M_selected_feature_file
+
+    xgb_feature_diagnostics_file = M_xgboost_diagnostics_file 
+    xgb_selected_feature_file = M_xgboost_selected_feature_file
+
+    dl_selected_feature_file = M_dl_selected_feature_file
+
+
+
+## shared
+col_renamed = {"Quantity":"target_value","Value":"feature_value"}
+driver_table = "Sales_Forecasting.silver.compiled_drivers"
+target_col = 'Value'
+
+elasticnet_init_features = 15
+xgboost_init_features = 200
+dl_init_features = 80
+
+elasticnet_run = False
+xgboost_run = False
+dl_run = True
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### Reading Data
+
+# MARKDOWN ********************
+
+# # **THERE IS A TEMP FILTER IN PLACE ON ACTUALS **
+
+# CELL ********************
+
+# ORIGINAL / BASE LEVEL DRIVERS
+compiled_drivers = spark.read.table(driver_table).select("Country","Indicator","Region","Date","Value")
+
+# ACTUALS TABLE
+data = spark.read.table(actuals_table).filter(col('Product_Category').isin('ALU',"SCREWS")).withColumnRenamed(initial_target_col,target_col)
+## aggregating based on the ACT GRP COLS defined
+data = data.groupBy(*ACT_GRP_COLS,"Date").agg(sum(target_col).alias(target_col))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### Driver Processing
+
+# CELL ********************
+
+## Aggregating the drivers based upon the DRV GRP COLS defined 
+aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+
+# if Indicator is the only value in DRV GRP COLS then the data will be aggregated at a lower level than world
+    # this ensures that "WORLD" level aggregated drivers are added to the aggregated_drivers set
+
+if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
+    # creates world level drivers
+    world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
+    
+    # populates the other DRV GRP COLS defined that aren't "Indicator" with the value of "World"
+    for cols in DRV_GRP_COLS:
+        if cols!='Indicator':
+            world_agg = world_agg.withColumn(cols, lit("World"))
+            print(f"{cols} added using .withColumn, populated with lit(World)")
+
+    aggregated_drivers = aggregated_drivers.unionByName(world_agg)
+    
+else:
+    print('world agg already done')
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### Split based on Classical/ML and DL workflows
+# 
+# ### Classical / ML Feature Processing
+# - FE / expansion
+# - Data reformatting
+# - STL residual application
+# - correlation analysis
+# -- filter out low / too high correlations
+# - ccf w/ lag identification
+# -- Clustering / Top Feature selection 
+# 
+# #### Classical Workflow
+# - filter Top Feature selection output for top features based on elasticnet_init_feature param
+# - Elastic Net selection
+#         
+#         - scale data for elastic net
+#         - select features based output per target series
+# 
+# 
+# #### ML Workflow
+# - filter Top Feature selection output for top features based on xgb_init_feature param
+# - XGBoost Selection
+#         - evaluate and select features that have stable usage over bootstraps & importance scores
+# 
+# 
+# 
+# 
+# 
+# ### DL Feature Processing:
+# - STL residual application
+# - correlation analysis
+# -- filter out low / too high correlations
+# - clustering / top feature selection 
+# - filter Top Feature selection output for top features based on DL_init_feature param
+
+
+# MARKDOWN ********************
+
+# ## CLASSICAL / ML WORKFLOW
+
+# CELL ********************
+
+if elasticnet_run or xgboost_run:
+    # applying feature_engineeringh method in order to expand the feature set
+    expanded_features = feature_engineering(aggregated_drivers, DRV_GRP_COLS).cache()
+
+    
+    ## REFORMATTING DATA
+    reformatted_df = reformatting_data(expanded_features, DRV_GRP_COLS)
+
+
+    ## FEATURE RESIDUALS
+
+    feature_stl_schema = StructType([
+        StructField("Feature", StringType(), False),
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ])
+
+    feature_residuals = reformatted_df.groupBy("Feature").applyInPandas(stl_decompose, schema=feature_stl_schema)
+
+
+
+    ## DATA RESIDUALS
+
+    data_stl_schema = StructType(
+        [StructField(c, StringType(), True) for c in ACT_GRP_COLS] +
+        [
+            StructField("Date", DateType(), False),
+            StructField("Value", DoubleType(), True),
+            StructField("residual", DoubleType(), True)
+        ]
+
+    )
+
+    data_residuals = data.groupBy(*ACT_GRP_COLS).applyInPandas(stl_decompose, schema=data_stl_schema)
+
+
+
+
+    ## APPLICATION OF CCF 
+
+    split_col = split(col("Feature"), "__")
+    feature_serie_cols = DRV_GRP_COLS + ['Feature_name']
+
+    for i, c in enumerate(feature_serie_cols):
+        feature_residuals = feature_residuals.withColumn(c, split_col.getItem(i))
+
+
+
+    ## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
+    data_distinct = data_residuals.select(*ACT_GRP_COLS).distinct()
+    drv_distinct = feature_residuals.select(*feature_serie_cols).distinct()
+
+
+
+    join_col = []
+    for a_col in ACT_GRP_COLS:
+        for d_col in feature_serie_cols:
+            if a_col == d_col:
+                join_col.append(d_col)
+                print(f"{d_col} added to join col list")
+
+    if len(join_col) == 0:
+        print("no shared columns so cross join was done")
+        pairs = data_distinct.crossJoin(drv_distinct)
+    else:
+        print(f"shared columns so the join was done on {join_col}")
+        pairs = data_distinct.join(drv_distinct, join_col, 'inner')
+
+
+    if len(ACT_GRP_COLS) == 0:
+        data_expanded = data_residuals.crossJoin(broadcast(pairs))
+    else:
+        data_expanded = data_residuals.join(broadcast(pairs), [*ACT_GRP_COLS], 'inner')
+
+
+    features_expanded = broadcast(pairs).join(feature_residuals, [*feature_serie_cols], 'inner')
+
+
+    join_cols = list(dict.fromkeys(ACT_GRP_COLS + feature_serie_cols))
+
+    joined_data_features = join_target_feature(
+        data_expanded, features_expanded, join_cols
+    )
+
+    ccf_schema = StructType(
+        [StructField(c, StringType(), False) for c in join_cols] +
+        [
+            StructField("Lag", IntegerType(), False),
+            StructField("Correlation", DoubleType(), True),
+            StructField('coverage', DoubleType(), True),
+            StructField('n_overlap', IntegerType(), False)
+        ]
+    )
+
+    ccf_output = joined_data_features.groupBy(join_cols).applyInPandas(apply_ccf, schema=ccf_schema)
+
+    ccf_filtered = ccf_filtering(ccf_output, join_cols, series)
+
+
+    ## FILTERING TOP FEATURES
+    filtered_features = top_x_feature_extraction(
+        joined_data_features.withColumnRenamed('Date','target_date'), 
+        ccf_filtered, 
+        (level_cols +['Feature_name']), 
+        ACT_GRP_COLS
+        ).cache()
+
+
+
+    ## MELT EXPANDED FEATURES TO A LONG FORMAT
+
+
+    # the 'melt_cols' are 'grouping cols' with 'Feature_name' removed 
+    melt_cols = DRV_GRP_COLS.copy()
+    if 'Feature_name' in melt_cols:
+        melt_cols.remove("Feature_name")
+
+    # all of the feature columns outputed from the feature_engineering method
+    feature_value_cols = [
+        "level",
+        "rolling_mean_3", "rolling_std_3",
+        "rolling_mean_6", "rolling_std_6",
+        "rolling_mean_12", "rolling_std_12",
+        "rolling_mean_24", "rolling_std_24",
+        "diff", "YoY_pct", "MoM_pct",
+    ]
+
+    ## unpivoting the data (taking the wide format of column per feature and it's value to long feature_name & feature_value columns)
+    expanded_features_long = expanded_features.unpivot(
+        ids=melt_cols + ["Date"],
+        values=feature_value_cols,              ## the columns to unpivot from wide to long format
+        variableColumnName="Feature_name",      ## column name of the original wide columns variable (col name)
+        valueColumnName="Feature_value"         ## the column name of the original value within the wide columns 
+    ).cache()
+
+    print(DRV_GRP_COLS)
+    grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
+
+    combos = filtered_features.select(*grp_cols, "Lag", "feature_rank").distinct()
+
+    # combining the actuals original data w/ the filtered features and their identified lags
+    # creating the driver_date column which is the actuals data lagged by the features identified lag
+    target_w_features = (
+        data
+        .join(combos, ACT_GRP_COLS, "inner")
+        .withColumn("driver_date", expr("add_months(Date, -Lag)"))
+    ).cache()
+
+
+    ## creating join conditions based on the DRV GRP COLS
+
+
+    conditions = []
+    for col_name in DRV_GRP_COLS:
+        conditions.append(
+            col(f"t.{col_name}")== col(f"f.{col_name}")
         )
-    )
 
-    ## filtering for only records with the rec lag and stable period flags as true
-    ccf_filtered = ccf_filtered.filter(
-        (col("rec_lag")==1) & (col("stable_flag")==1)
-    )
-
-
-    w_a = Window.partitionBy(*ACT_GRP_COLS).orderBy(desc("max_corr"))
-
-    ccf_filtered = ccf_filtered.withColumn("rank", dense_rank().over(w_a))
-
-
-
-    return ccf_filtered
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-DRV_GRP_COLS.append('Feature_name')
-
-filtered_features = top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS).cache()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-## melt expanded features to a long format
-
-# the 'melt_cols' are 'grouping cols' with 'Feature_name' removed 
-melt_cols = DRV_GRP_COLS.copy()
-if 'Feature_name' in melt_cols:
-    melt_cols.remove("Feature_name")
-
-# all of the feature columns outputed from the feature_engineering method
-feature_value_cols = [
-    "level",
-    "rolling_mean_3", "rolling_std_3",
-    "rolling_mean_6", "rolling_std_6",
-    "rolling_mean_12", "rolling_std_12",
-    "rolling_mean_18", "rolling_std_18",
-    "rolling_mean_24", "rolling_std_24",
-    "diff", "YoY_pct", "MoM_pct",
-]
-
-## unpivoting the data (taking the wide format of column per feature and it's value to long feature_name & feature_value columns)
-expanded_features_long = expanded_features.unpivot(
-    ids=melt_cols + ["Date"],
-    values=feature_value_cols,              ## the columns to unpivot from wide to long format
-    variableColumnName="Feature_name",      ## column name of the original wide columns variable (col name)
-    valueColumnName="Feature_value"         ## the column name of the original value within the wide columns 
-).cache()
-
-print(DRV_GRP_COLS)
-grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
-
-combos = filtered_features.select(*grp_cols, "Lag", "rank").distinct()
-
-# combining the actuals original data w/ the filtered features and their identified lags
-# creating the driver_date column which is the actuals data lagged by the features identified lag
-target_w_features = (
-    data
-    .join(combos, ACT_GRP_COLS, "inner")
-    .withColumn("driver_date", expr("add_months(Date, -Lag)"))
-).cache()
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-## creating join conditions based on the DRV GRP COLS
-
-
-conditions = []
-for col_name in DRV_GRP_COLS:
+    # appending "date" as a join condition
     conditions.append(
-        col(f"t.{col_name}")== col(f"f.{col_name}")
+        col("t.driver_date") == col("f.Date")
     )
 
-# appending "date" as a join condition
-conditions.append(
-    col("t.driver_date") == col("f.Date")
-)
+    ## creating the actual conditions
+    join_cond = reduce(operator.and_, conditions)
 
-## creating the actual conditions
-join_cond = reduce(operator.and_, conditions)
+    ## joining the target data w/ the driver/feature utilizing the DRV GRP COLS and driver_date (lagged date of feature) with the drivers value at that date
+    result = (
+        target_w_features.alias("t")
+        .join(
+            expanded_features_long.alias("f"),
+            join_cond,
+            "left"
+        ).select("t.*", "f.Feature_value")
+    )
 
-## joining the target data w/ the driver/feature utilizing the DRV GRP COLS and driver_date (lagged date of feature) with the drivers value at that date
-result = (
-    target_w_features.alias("t")
-    .join(
-        expanded_features_long.alias("f"),
-        join_cond,
-        "left"
-    ).select("t.*", "f.Feature_value")
-)
+    results_w_col = result.withColumn('feature_col', concat_ws("__",*DRV_GRP_COLS, col("Lag").cast("string")))
 
-results_w_col = result.withColumn('feature_col', concat_ws("__",*DRV_GRP_COLS, col("Lag").cast("string")))
+else:
+    print("Neither ElasticNetCV or XGBoost are being executed for Feature Selection")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## DL WORKFLOW
+
+# CELL ********************
+
+if dl_run:
+    print('feature selection for DL in progress')
+
+    ## ACTUAL RESIDUALS
+    act_resid_schema = StructType(
+        [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
+        [
+            StructField("Date", DateType(), False),
+            StructField("Value", DoubleType(), True),
+            StructField("residual", DoubleType(), True)
+        ]
+    )
+
+
+    data_residuals = data.groupBy(*ACT_GRP_COLS)\
+            .applyInPandas(
+                stl_decompose,
+                schema=act_resid_schema
+            )
+
+    ## FEATURE RESIDUALS
+    feature_set = aggregated_drivers
+
+    feature_resid_schema = StructType(
+        [StructField(c, StringType(), True) for c in DRV_GRP_COLS] +
+        [
+            StructField("Date", DateType(), False),
+            StructField("Value", DoubleType(), True),
+            StructField("residual", DoubleType(), True)
+        ]
+    )
+
+    feature_residuals = feature_set.groupBy(*DRV_GRP_COLS).applyInPandas(stl_decompose, schema=feature_resid_schema)
+
+
+    ## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
+    data_distinct = data_residuals.select(*ACT_GRP_COLS).distinct()
+    drv_distinct = feature_residuals.select(*DRV_GRP_COLS).distinct()
+
+
+
+    join_col = []
+    for a_col in ACT_GRP_COLS:
+        for d_col in DRV_GRP_COLS:
+            if a_col == d_col:
+                join_col.append(d_col)
+                print(f"{d_col} added to join col list")
+
+    if len(join_col) == 0:
+        print("no shared columns so cross join was done")
+        pairs = data_distinct.crossJoin(drv_distinct)
+    else:
+        print(f"shared columns so the join was done on {join_col}")
+        pairs = data_distinct.join(drv_distinct, join_col, 'inner')
+
+    if len(ACT_GRP_COLS) == 0:
+        data_expanded = data_residuals.crossJoin(broadcast(pairs))
+    else:
+        data_expanded = data_residuals.join(broadcast(pairs), [*ACT_GRP_COLS], 'inner')
+
+
+    features_expanded = broadcast(pairs).join(feature_residuals, [*DRV_GRP_COLS], 'inner')
+
+
+    join_cols = list(dict.fromkeys(ACT_GRP_COLS + DRV_GRP_COLS))
+
+    joined_data_features = join_target_feature(
+        data_expanded, features_expanded, join_cols
+    )
+
+
+    ## CALCULATING CORRELATION PER COMBINATION
+    corr_schema = StructType(
+        [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
+        [StructField(c, StringType(), False) for c in DRV_GRP_COLS] +
+        [
+            StructField("Correlation", DoubleType(), True),
+            StructField("Lag", IntegerType(), True)
+        ]
+    )
+
+    corr_df = (
+        joined_data_features
+        .groupBy(*(ACT_GRP_COLS + DRV_GRP_COLS))
+        .applyInPandas(dl_calc_corr, schema=corr_schema)
+    )
+
+
+
+    corr_df = corr_df.withColumn('ABS_Correlation', abs(col('Correlation')))
+    w_dl = Window.partitionBy(*ACT_GRP_COLS).orderBy(desc("ABS_Correlation"))
+
+    corr_rank_df = corr_df.withColumn('rank', dense_rank().over(w_dl))
+
+
+    final_features = corr_rank_df.filter(
+        (col('rank')<=dl_init_features) &
+        (col('ABS_Correlation')>=.1)
+        )
+    
+    display(final_features.orderBy(*ACT_GRP_COLS, asc('rank')))
+
+    final_features_df = final_features.orderBy(*ACT_GRP_COLS, asc('rank')).toPandas()
+    final_features_df.to_excel(dl_selected_feature_file)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
 
 
 # METADATA ********************
@@ -1382,35 +1398,6 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
-
-
-# ============================================================
-# RUN — distributed across Spark executors, one fit per series
-# ============================================================
-
-# ============================================================
-# OUTPUT SCHEMAS
-# ============================================================
-diagnostics_schema = StructType(
-    [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
-    [
-        StructField("Feature", StringType(), False),
-        StructField("Coefficient", DoubleType(), True),         # ElasticNet's fitted weight for the feature
-        StructField("abs_coef", DoubleType(), True),
-        StructField("importance", DoubleType(), True),
-        StructField("importance_pct", DoubleType(), True),
-        StructField("stability_score", DoubleType(), True),     # fraction of bootstrap resamples where the feature had a non zero coefficient
-        StructField("best_alpha", DoubleType(), True),          # 0-.03 real signal, .1-1 reasonable signal to noise 3-10 little to no value add from drivers
-        StructField("best_l1_ratio", DoubleType(), True),       # 0-.1 Mostly Ridge (keeps correlated features), .9-1 mostly Lasso (zeroes out redundant features)
-        StructField("test_r2", DoubleType(), True),             # Negative: feature is damaging forecast, 0-.15: weak, .15-.4 good performance
-        StructField("n_obs", IntegerType(), True),
-    ]
-)
-
-
-
-
-
 # METADATA ********************
 
 # META {
@@ -1421,6 +1408,31 @@ diagnostics_schema = StructType(
 # CELL ********************
 
 if elasticnet_run:
+
+    # ============================================================
+    # RUN — distributed across Spark executors, one fit per series
+    # ============================================================
+
+    # ============================================================
+    # OUTPUT SCHEMAS
+    # ============================================================
+    diagnostics_schema = StructType(
+        [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
+        [
+            StructField("Feature", StringType(), False),
+            StructField("Coefficient", DoubleType(), True),         # ElasticNet's fitted weight for the feature
+            StructField("abs_coef", DoubleType(), True),
+            StructField("importance", DoubleType(), True),
+            StructField("importance_pct", DoubleType(), True),
+            StructField("stability_score", DoubleType(), True),     # fraction of bootstrap resamples where the feature had a non zero coefficient
+            StructField("best_alpha", DoubleType(), True),          # 0-.03 real signal, .1-1 reasonable signal to noise 3-10 little to no value add from drivers
+            StructField("best_l1_ratio", DoubleType(), True),       # 0-.1 Mostly Ridge (keeps correlated features), .9-1 mostly Lasso (zeroes out redundant features)
+            StructField("test_r2", DoubleType(), True),             # Negative: feature is damaging forecast, 0-.15: weak, .15-.4 good performance
+            StructField("n_obs", IntegerType(), True),
+        ]
+    )
+
+
 
     results_elasticnet = results_w_col.filter(col('rank')<=elasticnet_init_features).drop('rank')
 
