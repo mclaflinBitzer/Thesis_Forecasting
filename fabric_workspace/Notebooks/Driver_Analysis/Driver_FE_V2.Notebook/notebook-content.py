@@ -53,56 +53,9 @@ from pyspark.sql.functions import col
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
-
-## TOPLINE
-T_series = ['series']
-T_DRV_GRP_COLS = ['Indicator']
-T_ACT_GRP_COLS = ['Product_Category','series']
-
-
-T_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-T_ACT_RENAME = {"Date":"target_date","residual":"target_residual"}
-
-
-T_DRV_COLS_RN = ['Indicator']
-T_ACT_COLS_RN = ['Product_Category', 'series']
-
-
-## MIDDLE
-M_series = ['series']
-M_DRV_GRP_COLS = ['Region','Indicator']
-M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
-
-M_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual", "Region":"feature_region"}
-M_ACT_RENAME = {"Date":"target_date","residual":"target_residual","Region":"target_region"}
-
-M_DRV_COLS_RN = ['feature_region','Indicator']
-M_ACT_COLS_RN = ['Product_Category', 'series', 'target_region']
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
 # #### ADF Test
-
-# CELL ********************
-
-compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
 # CELL ********************
 
@@ -165,55 +118,6 @@ def adf(df):
         })
 
     return pd.DataFrame([result])
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-T_adf_schema = StructType(
-    [StructField(c, StringType(), False) for c in T_DRV_GRP_COLS] +
-    [
-        StructField("adf_stat", DoubleType(), True),
-        StructField("adf_p_value", DoubleType(), True),
-        StructField("adf_stationary_flag", StringType(), True)
-    ]
-)
-
-T_drivers = compiled_drivers.groupBy(*T_DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
-T_adf_results = T_drivers.groupBy(*T_DRV_GRP_COLS).applyInPandas(adf, T_adf_schema)
-
-
-
-
-M_adf_schema = StructType(
-    [StructField(c, StringType(), False) for c in M_DRV_GRP_COLS] +
-    [
-        StructField("adf_stat", DoubleType(), True),
-        StructField("adf_p_value", DoubleType(), True),
-        StructField("adf_stationary_flag", StringType(), True)       
-    ]
-)
-
-M_drivers = compiled_drivers.groupBy(*M_DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
-M_adf_results = M_drivers.groupBy(*M_DRV_GRP_COLS).applyInPandas(adf, M_adf_schema)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(T_adf_results.groupBy('adf_stationary_flag').count())
-display(M_adf_results.groupBy('adf_stationary_flag').count())
 
 # METADATA ********************
 
@@ -294,56 +198,6 @@ def kpss(df):
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
-
-T_kpss_schema = StructType(
-    [StructField(c, StringType(), False) for c in T_DRV_GRP_COLS] +
-    [
-        StructField("kpss_stat", DoubleType(), True),
-        StructField("kpss_p_value", DoubleType(), True),
-        StructField("kpss_stationary_flag", StringType(), False)
-    ]
-)
-
-
-T_kpss_results = T_drivers.groupBy(*T_DRV_GRP_COLS)\
-                    .applyInPandas(kpss, schema=T_kpss_schema)
-
-
-M_kpss_schema = StructType(
-    [StructField(c, StringType(), False) for c in M_DRV_GRP_COLS] +
-    [
-        StructField("kpss_stat", DoubleType(), True),
-        StructField("kpss_p_value", DoubleType(), True),
-        StructField("kpss_stationary_flag", StringType(), False)
-    ]
-)
-
-M_kpss_results = M_drivers.groupBy(*M_DRV_GRP_COLS)\
-                    .applyInPandas(kpss, schema=M_kpss_schema)
-
-        
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(T_kpss_results.groupBy('kpss_stationary_flag').count())
-display(M_kpss_results.groupBy('kpss_stationary_flag').count())
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
 # ### Combine adf & kpss outputs
@@ -396,62 +250,12 @@ def stationary_flag(df_stationary_stats):
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
-
-T_results = T_adf_results.join(T_kpss_results, [*T_DRV_GRP_COLS], "inner")
-M_results = M_adf_results.join(M_kpss_results, [*M_DRV_GRP_COLS], "inner")
-
-T_stationary_stats = stationary_flag(T_results)
-M_stationary_stats = stationary_flag(M_results)
-
-display(T_stationary_stats.limit(10))
-display(M_stationary_stats.limit(10))
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-M_stationary_df = M_stationary_stats.toPandas()
-T_stationary_df = T_stationary_stats.toPandas()
-
-output_path = "/lakehouse/default/Files/Driver_Analysis/stationary_stats.xlsx"
-with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-    T_stationary_df.to_excel(writer, sheet_name='topline_stats', index=False)
-    M_stationary_df.to_excel(writer, sheet_name='middle_stats', index=False)
-    print(f"saved to {output_path}")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
 # ## Stage 2: Target / Driver Transformations
 # **Purpose:** Align target + driver values using STL decomposition
 # ##### Transformations - Apply STL in order to only do the correlation analysis upon the residuals
 # ---
-
-# CELL ********************
-
-feature_set = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
-topline_cutoff_data = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data").withColumnRenamed("Quantity","Value")
-middle_cutoff_data = spark.read.table("Sales_Forecasting.silver.middle_cutoff_data").withColumnRenamed("Quantity","Value")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
 # CELL ********************
 
@@ -475,155 +279,15 @@ def stl_decompose(pdf: pd.DataFrame) -> pd.DataFrame:
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
-
-T_schema = StructType(
-    [StructField(c, StringType(), False) for c in T_ACT_GRP_COLS] +
-    [
-        StructField("Date", DateType(), False),
-        StructField("Value", DoubleType(), True),
-        StructField("residual", DoubleType(), True)
-    ]
-)
-
-T_data = topline_cutoff_data.groupBy(*T_ACT_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
-topline_residuals = T_data.groupBy(*T_ACT_GRP_COLS)\
-        .applyInPandas(
-            stl_decompose,
-            schema=T_schema
-        )
-
-M_schema = StructType(
-    [StructField(c, StringType(), False) for c in M_ACT_GRP_COLS] +
-    [
-        StructField("Date", DateType(), False),
-        StructField("Value", DoubleType(), True),
-        StructField("residual", DoubleType(), True)
-    ]
-)
-
-M_data = middle_cutoff_data.groupBy(*M_ACT_GRP_COLS,'Date').agg(sum("Value").alias("Value"))
-middle_residuals = M_data.groupBy(*M_ACT_GRP_COLS)\
-    .applyInPandas(stl_decompose, schema=M_schema)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-T_feature_set_schema = StructType(
-    [StructField(c, StringType(), False) for c in T_DRV_GRP_COLS] +
-    [
-        StructField("Date", DateType(), False),
-        StructField("Value", DoubleType(), True),
-        StructField("residual", DoubleType(), True)
-    ]
-)
-
-T_feature_set = feature_set.groupBy(*T_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
-T_feature_set_residuals = T_feature_set.groupBy(*T_DRV_GRP_COLS).applyInPandas(stl_decompose, schema=T_feature_set_schema)
-
-M_feature_set_schema = StructType(
-    [StructField(c, StringType(), False) for c in M_DRV_GRP_COLS] +
-    [
-        StructField("Date", DateType(), False),
-        StructField("Value", DoubleType(), True),
-        StructField("residual", DoubleType(), True)
-    ]
-)
-
-M_feature_set = feature_set.groupBy(*M_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
-M_feature_set_residuals = M_feature_set.groupBy(*M_DRV_GRP_COLS).applyInPandas(stl_decompose, schema=M_feature_set_schema)
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
 # #### Application of CCF
 # 
 # #### Joining target / drivers prior to CCF calculation
 
-# CELL ********************
-
-T_feature_set_residuals = T_feature_set_residuals.withColumnsRenamed(T_DRV_RENAME)
-M_feature_set_residuals = M_feature_set_residuals.withColumnsRenamed(M_DRV_RENAME)
-T_residuals = topline_residuals.withColumnsRenamed(T_ACT_RENAME)
-M_residuals = middle_residuals.withColumnsRenamed(M_ACT_RENAME)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
 # ##### Create mapping of features to targets
-
-# CELL ********************
-
-## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
-
-    ## TOPLINE
-T_act_distinct = T_residuals.select(*T_ACT_COLS_RN).distinct()
-T_drv_distinct = T_feature_set_residuals.select(*T_DRV_COLS_RN).distinct()
-
-M_act_distinct = M_residuals.select(*M_ACT_COLS_RN).distinct()
-M_drv_distinct = M_feature_set_residuals.select(*M_DRV_COLS_RN).distinct()
-
-T_pairs = T_act_distinct.crossJoin(T_drv_distinct)
-M_pairs = M_act_distinct.crossJoin(M_drv_distinct)
-
-## also joining M_paris w/ the world level aggregated indicators from topline
-M_w_pairs = M_act_distinct.crossJoin(T_drv_distinct)
-M_w_pairs = M_w_pairs.withColumn("feature_region", lit('World'))
-
-M_pairs = M_pairs.unionByName(M_w_pairs)
-
-
-T_pairs_df = T_pairs.toPandas()
-M_pairs_df = M_pairs.toPandas()
-
-output_path = '/lakehouse/default/Files/Driver_Analysis/pairs.xlsx'
-
-with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-    T_pairs_df.to_excel(writer, sheet_name='Topline_pairs', index=False)
-    M_pairs_df.to_excel(writer, sheet_name='Middle_pairs', index=False)
-    print(f"saved to {output_path}")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-expanded_topline = T_residuals.join(broadcast(T_pairs), [*T_ACT_COLS_RN], 'inner')
-expanded_middle = M_residuals.join(broadcast(M_pairs), [*M_ACT_COLS_RN], 'inner')
-
-
-expanded_t_features = broadcast(T_pairs).join(T_feature_set_residuals, [*T_DRV_COLS_RN], 'inner')
-expanded_m_features = broadcast(M_pairs).join(M_feature_set_residuals, [*M_DRV_COLS_RN], 'inner')
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
 # CELL ********************
 
@@ -664,46 +328,6 @@ def join_target_feature(
              col(f"{feature_alias}.feature_residual")
          )
     )
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline_join_pairs = T_ACT_COLS_RN + T_DRV_COLS_RN
-final_topline = join_target_feature(
-    expanded_topline, expanded_t_features, topline_join_pairs)
-
-
-middle_join_pairs = M_ACT_COLS_RN + M_DRV_COLS_RN
-final_middle = join_target_feature(
-    expanded_middle, expanded_m_features, middle_join_pairs)
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-output_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis"
-
-final_topline.write.mode("overwrite").parquet(
-    f"{output_dir}/final_topline.parquet"
-)
-
-final_middle.write.mode("overwrite").parquet(
-    f"{output_dir}/final_middle.parquet"
-)
-
-print("Parquet files written successfully.")
 
 # METADATA ********************
 
@@ -779,60 +403,6 @@ def apply_ccf(df):
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
-
-T_cols = T_ACT_COLS_RN + T_DRV_COLS_RN
-T_ccf_schema = StructType(
-    [StructField(c, StringType(), False) for c in T_cols] +
-    [
-
-        StructField("Lag", IntegerType(), False),
-        StructField("Correlation", DoubleType(), True)
-    ]
-)
-
-T_ccf = final_topline.groupBy(*T_cols).applyInPandas(apply_ccf, schema = T_ccf_schema)
-
-
-
-M_cols = M_ACT_COLS_RN + M_DRV_COLS_RN
-M_ccf_schema = StructType(
-    [StructField(c, StringType(), False) for c in M_cols] +
-    [
-
-        StructField("Lag", IntegerType(), False),
-        StructField("Correlation", DoubleType(), True)
-    ]
-)
-
-M_ccf = final_middle.groupBy(*M_cols).applyInPandas(apply_ccf, schema=M_ccf_schema)
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-base_dir = 'abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis'
-
-T_ccf.write.mode('overwrite').parquet(f"{base_dir}/topline_ccf_base.parquet")
-
-M_ccf.write.mode('overwrite').parquet(f"{base_dir}/middle_ccf_base.parquet")
-
-print("Parquet files written successfully.")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # MARKDOWN ********************
 
 # ## Stage 4: Feature Selection
@@ -842,33 +412,6 @@ print("Parquet files written successfully.")
 # 
 #         input: raw driver data at lag/lead identified, engineered features at lag/lead identified 
 #         output: take the top x features
-
-# CELL ********************
-
-base_dir = 'abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis'
-
-topline_ccf = spark.read.parquet(f"{base_dir}/topline_ccf_base.parquet")
-middle_ccf = spark.read.parquet(f"{base_dir}/middle_ccf_base.parquet")
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(topline_ccf.select(*T_cols).distinct().groupBy('series').count())
-display(middle_ccf.select(*M_cols).distinct().groupBy('series').count())
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
 # CELL ********************
 
@@ -901,36 +444,6 @@ def ccf_filtering(df, cols, serie_col):
     df_final_filtered = df_rank_filtered.join(df_filtered, [*cols], 'inner').drop(df_rank_filtered['max_corr'],df_rank_filtered['rank'])
 
     return df_final_filtered
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-topline_ccf_filtered = ccf_filtering(topline_ccf, T_cols)
-middle_ccf_filtered = ccf_filtering(middle_ccf, M_cols)
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# topline_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.topline_ccf_base")
-# middle_ccf = spark.read.table("Sales_Forecasting.Driver_Exploration_V2.middle_ccf_base")
-
-# display(topline_ccf.select('series','feature_region','Country','Indicator').distinct().groupBy('series').count())
-# display(middle_ccf.select('series','feature_region','Country','Indicator').distinct().groupBy('series').count())
-
-
 
 # METADATA ********************
 
@@ -1137,61 +650,412 @@ def top_x_feature_extraction(df_f_resid, df_ccf_filtered, grp_cols, act_cols, nu
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# # Full parameterized pipeline / Horvath implementation
+
+# CELL ********************
+
+## TOPLINE
+T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
+
+T_target_col = 'Quantity'
+
+T_DRV_GRP_COLS = ['Indicator']
+T_ACT_GRP_COLS = ['Product_Category','series']
+
+
+T_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+T_ACT_RENAME = {"Date":"target_date","residual":"target_residual"}
+
+
+# T_DRV_COLS_RN = ['Indicator']
+# T_ACT_COLS_RN = ['Product_Category', 'series']
+
+T_stationary_stats_output_path = "/lakehouse/default/Files/Driver_Analysis/topline_stationary_stats.xlsx"
+T_pairs_path = "/lakehouse/default/Files/Driver_Analysis/topline_pairs.xlsx"
+T_joined_act_f_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis/final_topline.parquet"
+
+
+
+## MIDDLE
+M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
+
+M_target_col = "Quantity"
+
+M_DRV_GRP_COLS = ['Region','Indicator']
+M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
+
+M_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual"} #"Region":"feature_region"}
+M_ACT_RENAME = {"Date":"target_date","residual":"target_residual"} #,"Region":"target_region"}
+
+# M_DRV_COLS_RN = ['feature_region','Indicator']
+# M_ACT_COLS_RN = ['Product_Category', 'series', 'target_region']
+
+
+M_stationary_stats_output_path = "/lakehouse/default/Files/Driver_Analysis/middle_stationary_stats.xlsx"
+M_pairs_path = "/lakehouse/default/Files/Driver_Analysis/middle_pairs.xlsx"
+M_joined_act_f_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis/final_middle.parquet"
+
+
+Topline = False
+
+if Topline:
+
+    actuals_table = T_actuals_table 
+    
+    target_col = T_target_col
+
+    DRV_GRP_COLS = T_DRV_GRP_COLS 
+    ACT_GRP_COLS = T_ACT_GRP_COLS 
+
+
+    ACT_RENAME = T_ACT_RENAME
+    DRV_RENAME = T_DRV_RENAME
+
+    # ACT_COLS_RN = T_ACT_COLS_RN
+    # DRV_COLS_RN = T_DRV_COLS_RN
+    
+    stationary_stats_output_path = T_stationary_stats_output_path
+    pairs_path = T_pairs_path
+    joined_act_f_dir = T_joined_act_f_dir
+
+else:
+    
+    actuals_table = M_actuals_table
+
+    target_col = M_target_col
+
+    DRV_GRP_COLS = M_DRV_GRP_COLS 
+    ACT_GRP_COLS = M_ACT_GRP_COLS 
+
+    ACT_RENAME = M_ACT_RENAME
+    DRV_RENAME = M_DRV_RENAME
+
+    # ACT_COLS_RN = M_ACT_COLS_RN
+    # DRV_COLS_RN = M_DRV_COLS_RN
+
+    stationary_stats_output_path = M_stationary_stats_output_path
+    pairs_path = M_pairs_path
+    joined_act_f_dir = M_joined_act_f_dir
+
+## shared
+JOIN_T_F_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
+col_renamed = {"Quantity":"target_value","Value":"feature_value"}
+driver_table = "Sales_Forecasting.silver.compiled_drivers"
+
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+adf_schema = StructType(
+    [StructField(c, StringType(), True) for c in DRV_GRP_COLS] +
+    [
+        StructField("adf_stat", DoubleType(), True),
+        StructField("adf_p_value", DoubleType(), True),
+        StructField("adf_stationary_flag", StringType(), True)        
+    ]
+)
+
+drivers = compiled_drivers.groupBy(*DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
+adf_results = drivers.groupBy(*DRV_GRP_COLS).applyInPandas(adf, adf_schema)
+display(adf_results.groupBy('adf_stationary_flag').count())
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+kpss_schema = StructType(
+    [StructField(c, StringType(), True) for c in DRV_GRP_COLS] +
+    [
+        StructField("kpss_stat", DoubleType(), True),
+        StructField("kpss_p_value", DoubleType(), True),
+        StructField("kpss_stationary_flag", StringType(), False)       
+    ]
+)
+
+kpss_results = drivers.groupBy(DRV_GRP_COLS).applyInPandas(kpss, kpss_schema)
+display(kpss_results.groupBy('kpss_stationary_flag').count())
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+results = adf_results.join(kpss_results, [*DRV_GRP_COLS], 'inner')
+stationary_stats = stationary_flag(results)
+
+stationary_df = stationary_stats.toPandas()
+
+stationary_df.to_excel(stationary_stats_output_path)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+feature_set = compiled_drivers
+cutoff_data = spark.read.table(actuals_table).withColumnRenamed(target_col, 'Value')
+
+
+act_resid_schema = StructType(
+    [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
+
+data = cutoff_data.groupBy(*ACT_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+act_residuals = data.groupBy(*ACT_GRP_COLS)\
+        .applyInPandas(
+            stl_decompose,
+            schema=act_resid_schema
+        )
+display(act_residuals.limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+feature_resid_schema = StructType(
+    [StructField(c, StringType(), True) for c in DRV_GRP_COLS] +
+    [
+        StructField("Date", DateType(), False),
+        StructField("Value", DoubleType(), True),
+        StructField("residual", DoubleType(), True)
+    ]
+)
+
+feature_set = feature_set.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+feature_set_residuals = feature_set.groupBy(*DRV_GRP_COLS).applyInPandas(stl_decompose, schema=feature_resid_schema)
+
+display(feature_set_residuals.limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+feature_set_residuals = feature_set_residuals.withColumnsRenamed(DRV_RENAME)
+act_residuals = act_residuals.withColumnsRenamed(ACT_RENAME)
+
+act_distinct = act_residuals.select(*ACT_GRP_COLS).distinct()
+drv_distinct = feature_set_residuals.select(*DRV_GRP_COLS).distinct()
+
+
+join_col = []
+for a_col in ACT_GRP_COLS:
+    for d_col in DRV_GRP_COLS:
+        if a_col == d_col:
+            join_col.append(d_col)
+            print(f"{d_col} added to join col list")
+
+
+if len(join_col) == 0:
+    print("no shared columns so cross join was done")
+    pairs = act_distinct.crossJoin(drv_distinct)
+else:
+    print(f"shared columns so the join was done on {join_col}")
+    pairs = act_distinct.join(drv_distinct, join_col, 'inner')
+
+
+if len(ACT_GRP_COLS) == 0:
+    expanded_act = act_residuals.crossJoin(broadcast(pairs))
+else:
+    expanded_act = act_residuals.join(broadcast(pairs), [*ACT_GRP_COLS], 'inner')
+
+expanded_features = broadcast(pairs).join(feature_set_residuals, [*DRV_GRP_COLS], 'inner')
+
+final = join_target_feature(
+    expanded_act, expanded_features, JOIN_T_F_cols
+)
+
+
+
+pairs_pd = pairs.toPandas()
+pairs_pd.to_excel(pairs_path)
+final.write.mode('overwrite').parquet(joined_act_f_dir)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(final.limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+JOIN_T_F_cols
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+ccf_schema = StructType(
+    [StructField(c, StringType(), False) for c in JOIN_T_F_cols] +
+    [
+
+        StructField("Lag", IntegerType(), False),
+        StructField("Correlation", DoubleType(), True),
+        StructField("n_overlap", IntegerType(), False),
+        StructField("coverage", DoubleType(), False)
+    ]
+)
+
+ccf_output = final.groupBy(JOIN_T_F_cols).applyInPandas(apply_ccf, schema=ccf_schema)
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+T_cols = T_ACT_COLS_RN + T_DRV_COLS_RN
+T_ccf_schema = StructType(
+    [StructField(c, StringType(), False) for c in T_cols] +
+    [
+
+        StructField("Lag", IntegerType(), False),
+        StructField("Correlation", DoubleType(), True)
+    ]
+)
+
+T_ccf = final_topline.groupBy(*T_cols).applyInPandas(apply_ccf, schema = T_ccf_schema)
+
+
+
+M_cols = M_ACT_COLS_RN + M_DRV_COLS_RN
+M_ccf_schema = StructType(
+    [StructField(c, StringType(), False) for c in M_cols] +
+    [
+
+        StructField("Lag", IntegerType(), False),
+        StructField("Correlation", DoubleType(), True)
+    ]
+)
+
+M_ccf = final_middle.groupBy(*M_cols).applyInPandas(apply_ccf, schema=M_ccf_schema)
+
+
+base_dir = 'abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis'
+
+T_ccf.write.mode('overwrite').parquet(f"{base_dir}/topline_ccf_base.parquet")
+
+M_ccf.write.mode('overwrite').parquet(f"{base_dir}/middle_ccf_base.parquet")
+
+print("Parquet files written successfully.")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+base_dir = 'abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis'
+
+topline_ccf = spark.read.parquet(f"{base_dir}/topline_ccf_base.parquet")
+middle_ccf = spark.read.parquet(f"{base_dir}/middle_ccf_base.parquet")
+
+display(topline_ccf.select(*T_cols).distinct().groupBy('series').count())
+display(middle_ccf.select(*M_cols).distinct().groupBy('series').count())
+
+topline_ccf_filtered = ccf_filtering(topline_ccf, T_cols)
+middle_ccf_filtered = ccf_filtering(middle_ccf, M_cols)
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # CELL ********************
 
 base_dir = 'abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Driver_Analysis'
 middle_w_features = spark.read.parquet(f'{base_dir}/final_middle.parquet')
 topline_w_features = spark.read.parquet(f'{base_dir}/final_topline.parquet')
 
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 display(topline_w_features.groupBy(*T_ACT_COLS_RN).agg(countDistinct(*T_DRV_COLS_RN).alias('count_indicators')))
 display(middle_w_features.groupBy(*M_ACT_COLS_RN).agg(countDistinct(*M_DRV_COLS_RN).alias('count_indicators')))
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 final_middle_features = top_x_feature_extraction(middle_w_features, middle_ccf_filtered, M_cols, M_ACT_COLS_RN, 30)
 
 final_topline_features = top_x_feature_extraction(topline_w_features, topline_ccf_filtered, T_cols, T_ACT_COLS_RN, 30)
 
 display(final_topline_features.limit(10))
+
 display(final_middle_features.limit(10))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 display(final_topline_features.groupBy(*T_ACT_COLS_RN).agg(countDistinct(*T_DRV_COLS_RN).alias('count_indicators')))
 display(final_middle_features.groupBy(*M_ACT_COLS_RN).agg(countDistinct(*M_DRV_COLS_RN).alias('count_indicators')))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 topline_f = final_topline_features.orderBy(*T_ACT_COLS_RN, asc('feature_rank'), *T_DRV_COLS_RN, 'Lag').toPandas()
 middle_f = final_middle_features.orderBy(*M_ACT_COLS_RN, asc('feature_rank'), *M_DRV_COLS_RN, asc('Lag')).toPandas()
@@ -1201,15 +1065,6 @@ with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
     topline_f.to_excel(writer, sheet_name="Topline_Features", index=False)
     middle_f.to_excel(writer, sheet_name="Middle_Featuers", index=False)
     print(f"saved to {output_path}")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
 
 final_topline_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.topline_top_features")
 final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.Driver_Exploration_V2.middle_top_features")
@@ -1221,129 +1076,7 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# MARKDOWN ********************
-
-# # Full parameterized pipeline / Horvath implementation
-
 # CELL ********************
-
-# driver_test = spark.read.table("Sales_Forecasting.silver.compiled_drivers").filter(
-#     (col("Indicator")=="Data Center") |
-#     (col("Indicator")=="Cold Storage Plants") |
-#     (col("Indicator")=="Food Processing Plants") |
-#     (col("Indicator")=="Leisure & Hospitality Buildings") |
-#     (col("Indicator")=="Stores") 
-# )
-
-# H_DRV_GRP_COLS = ['Indicator']
-# H_ACT_GRP_COLS = []
-
-# H_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-# H_ACT_RENAME = {"Date":"target_date","residual":"target_residual"}
-
-# H_DRV_COLS_RN = ['Indicator']
-# H_ACT_COLS_RN = []
-
-# H_cols = (H_DRV_COLS_RN + H_ACT_COLS_RN)
-# H_series = []
-
-# H_feature_set_schema = StructType(
-#     [StructField(c, StringType(), False) for c in H_DRV_GRP_COLS] +
-#     [
-#         StructField("Date", DateType(), False),
-#         StructField("Value", DoubleType(), True),
-#         StructField("residual", DoubleType(), True)
-#     ]
-# )
-
-# H_org = spark.read.table('Sales_Forecasting.bronze.topline_data').withColumnRenamed("Quantity","Value")
-# H_org = H_org.filter(col("Date")>='2015-06-01')
-# H_data = H_org.groupBy('Date').agg(sum('Value').alias('Value'))
-
-# H_schema = StructType(
-#     [StructField(c, StringType(), False) for c in H_ACT_GRP_COLS] +
-#     [
-#         StructField("Date", DateType(), False),
-#         StructField("Value", DoubleType(), True),
-#         StructField("residual", DoubleType(), True)
-#     ]
-# )
-
-
-# H_residuals = H_data.groupBy(*H_ACT_GRP_COLS)\
-#         .applyInPandas(
-#             stl_decompose,
-#             schema=H_schema
-#         )
-
-
-# H_feature_set = driver_test.groupBy(*H_DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
-# H_feature_set_residuals = H_feature_set.groupBy(*H_DRV_GRP_COLS).applyInPandas(stl_decompose, schema=H_feature_set_schema)
-
-
-# pivot = (
-#     H_feature_set_residuals
-#     .groupBy("Date")
-#     .pivot("Indicator")
-#     .agg(first("residual"))
-#     .orderBy("Date")
-# )
-
-# ## APPLICATION OF CCF
-# H_feature_set_residuals = H_feature_set_residuals.withColumnsRenamed(H_DRV_RENAME)
-# H_residuals = H_residuals.withColumnsRenamed(H_ACT_RENAME)
-
-
-# ## CREATE MAPPING FOR TARGET-DRIVER COMBINATIONS
-# H_act_distinct = H_residuals.select(*H_ACT_COLS_RN).distinct()
-# H_drv_distinct = H_feature_set_residuals.select(*H_DRV_COLS_RN).distinct()
-
-# join_col = []
-# for a_col in H_ACT_COLS_RN:
-#     for d_col in H_DRV_COLS_RN:
-#         if a_col == d_col:
-#             join_col.append(d_col)
-#             print(f"{d_col} added to join col list")
-
-# if len(join_col) == 0:
-#     print("no shared columns so cross join was done")
-#     H_pairs = H_act_distinct.crossJoin(H_drv_distinct)
-# else:
-#     print(f"shared columns so the join was done on {join_col}")
-#     H_pairs = H_act_distinct.join(H_drv_distinct, join_col, 'inner')
-# if len(H_ACT_COLS_RN) == 0:
-#     H_expanded = H_residuals.crossJoin(broadcast(H_pairs))
-# else:
-#     H_expanded = H_residuals.join(broadcast(H_pairs), [*H_ACT_COLS_RN], 'inner')
-
-
-# H_expanded_features = broadcast(H_pairs).join(H_feature_set_residuals, [*H_DRV_COLS_RN], 'inner')
-
-# H_final = join_target_feature(
-#     H_expanded, H_expanded_features, H_cols
-# )
-
-# H_ccf_schema = StructType(
-#     [StructField(c, StringType(), False) for c in H_cols] +
-#     [
-
-#         StructField("Lag", IntegerType(), False),
-#         StructField("Correlation", DoubleType(), True)
-#     ]
-# )
-
-# H_ccf = H_final.groupBy(*H_cols).applyInPandas(apply_ccf, schema = H_ccf_schema)
-
-
-# H_ccf_filtered = ccf_filtering(H_ccf, H_cols, H_series)
-
-# H_w_features = H_final
-
-# display(H_w_features.groupBy(*H_ACT_COLS_RN).agg(countDistinct(*H_DRV_COLS_RN).alias('count_indicators')))
-
-# final_H_features = top_x_feature_extraction(H_w_features, H_ccf_filtered, H_cols, H_ACT_COLS_RN, 30)
-
-# display(final_H_features.groupBy(*H_ACT_COLS_RN).agg(countDistinct(*H_DRV_COLS_RN).alias("count_indicators")))
 
 
 # METADATA ********************
@@ -1356,17 +1089,37 @@ final_middle_features.write.format("delta").mode("overwrite").saveAsTable("Sales
 # CELL ********************
 
 
-H_DRV_GRP_COLS = ['Indicator']
-H_ACT_GRP_COLS = []
+# METADATA ********************
 
-H_DRV_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-H_ACT_RENAME = {"Date":"target_date","residual":"target_residual"}
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
-H_DRV_COLS_RN = ['Indicator']
-H_ACT_COLS_RN = []
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+H_DRV_GRP_COLS = T_DRV_GRP_COLS
+H_ACT_GRP_COLS = T_ACT_GRP_COLS
+
+H_DRV_RENAME = T_DRV_RENAME
+H_ACT_RENAME = T_ACT_RENAME
+
+H_DRV_COLS_RN = T_DRV_COLS_RN
+H_ACT_COLS_RN = T_ACT_COLS_RN
 
 H_cols = (H_DRV_COLS_RN + H_ACT_COLS_RN)
-H_series = []
+H_series = T_series
 
 H_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
 
@@ -1379,6 +1132,7 @@ H_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
 
 # CELL ********************
 
+H_data = spark.read.table(H_actuals_table)
 ## ADF test
 H_adf_schema = StructType(
     [StructField(c, StringType(), False) for c in H_DRV_GRP_COLS] +

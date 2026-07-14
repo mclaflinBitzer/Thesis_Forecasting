@@ -99,7 +99,7 @@ driver_table = "Sales_Forecasting.silver.compiled_drivers"
 
 # CELL ********************
 
-Topline = False
+Topline = True
 
 if Topline:
     series = T_series
@@ -169,7 +169,7 @@ xgboost_run = True
 compiled_drivers = spark.read.table(driver_table).select("Country","Indicator","Region","Date","Value")
 
 # ACTUALS TABLE
-data = spark.read.table(actuals_table)
+data = spark.read.table(actuals_table).filter(col('Product_Category').isin('ALU',"SCREWS"))
 ## aggregating based on the ACT GRP COLS defined
 data = data.groupBy(*ACT_GRP_COLS,"Date").agg(sum("Quantity").alias("Quantity"))
 
@@ -237,7 +237,6 @@ def feature_engineering(df, drv_grp_cols):
     w_3 = Window.partitionBy(*drv_grp_cols).orderBy("Date").rowsBetween(-2,0)
     w_6 = Window.partitionBy(*drv_grp_cols).orderBy("Date").rowsBetween(-5,0)
     w_12 = Window.partitionBy(*drv_grp_cols).orderBy("Date").rowsBetween(-11,0)
-    w_18 = Window.partitionBy(*drv_grp_cols).orderBy("Date").rowsBetween(-17,0)
     w_24 = Window.partitionBy(*drv_grp_cols).orderBy("Date").rowsBetween(-23,0)
 
 
@@ -245,7 +244,6 @@ def feature_engineering(df, drv_grp_cols):
         3: w_3,
         6: w_6,
         12: w_12,
-        18: w_18,
         24: w_24
     }
 
@@ -645,8 +643,418 @@ ccf_filtered = ccf_filtering(ccf_output, join_cols, series)
 
 # CELL ********************
 
-def top_features(ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS):
+def corr_clustering(df):
+
+    # grouping columns are whatever isn't a measure
+    group_cols = [
+        c for c in df.columns
+        if c not in [
+            "target_date",
+            "feature_id",
+            "feature_residual"
+        ]
+    ]
+
+    group_values = {
+        c: df[c].iloc[0]
+        for c in group_cols
+    }
+
+    wide_df = (
+        df.pivot_table(
+            index=group_cols + ["target_date"],
+            columns="feature_id",
+            values="feature_residual",
+            aggfunc="first"
+        )
+        .reset_index()
+    )
+
+    X = (
+        wide_df
+        .drop(columns=group_cols + ["target_date"])
+        .select_dtypes(include=[np.number])
+        .fillna(0)
+    )
+
+    corr = X.corr().abs().fillna(0)
+    distance = 1 - corr
+
+    linkage = sch.linkage(
+        squareform(distance.values, checks=False),
+        method="average"
+    )
+
+    labels = sch.fcluster(
+        linkage,
+        t=0.2,
+        criterion="distance"
+    )
+
+    cluster_map = pd.DataFrame({
+        **group_values,
+        "feature_id": X.columns,
+        "cluster": labels
+    })
+
+    return cluster_map
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+joined_data_features.cache()
+ccf_filtered.cache()
+display(joined_data_features.limit(3))
+display(ccf_filtered.limit(3))
+DRV_GRP_COLS.append('Feature_name')
+print(DRV_GRP_COLS)
+print(ACT_GRP_COLS)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+df_f_resid = joined_data_features
+df_ccf_filtered = ccf_filtered
+
+grp_cols = DRV_GRP_COLS
+act_cols = ACT_GRP_COLS
+
+df_f_resid = df_f_resid.withColumn("feature_serie", concat_ws("__", *grp_cols)).withColumnRenamed('Date','target_date')
+
+df_ccf_filtered = df_ccf_filtered.withColumn("feature_serie", concat_ws("__", *grp_cols))
+
+
+## creating the feature_id for the feature/serie combinations that persisted after filtering
+feature_series = df_ccf_filtered.select("feature_serie").distinct()
+feature_series = feature_series.withColumn("feature_id", row_number().over(Window.orderBy("feature_serie")))
+
+## ensuring there is no ambiguity in the joins
+
+r = df_f_resid.alias("r")
+
+initial_joined_df = feature_series.join(df_ccf_filtered, ["feature_serie"], "left").drop('Feature_name','Indicator')
+joined_df = initial_joined_df.join(r, ['feature_serie',*act_cols], 'inner')
+    # .drop(*[col(f"r.{c}") for c in grp_cols])\
+    # .select(*grp_cols, *[col(f"r.{c}") for c in r.columns if c in act_cols if c not in grp_cols + ["feature_serie"]], "target_date", "feature_id", "feature_residual" )
+
+
+schema = StructType(
+    [StructField(c, StringType(), False) for c in grp_cols] +
+    [
+        StructField("feature_id", IntegerType(), False),
+        StructField("cluster", IntegerType(), False)
+    ]
+)
+
+
+# clustering = joined_df.select(*act_cols, *grp_cols, 'target_date','feature_id','feature_residual').groupBy(*act_cols).applyInPandas(corr_clustering, schema=schema)
+# display(clustering)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+df = joined_df.select(*act_cols, *grp_cols, 'target_date','feature_id','feature_residual').filter(col('Product_Category')=='ALU').toPandas()
+display(df.head(1))
+
+# grouping columns are whatever isn't a measure
+group_cols = [
+    c for c in df.columns
+    if c not in [
+        "target_date",
+        "feature_id",
+        "feature_residual"
+    ]
+]
+
+group_cols
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+def corr_clustering(df):
+
+
+    group_values = {
+        c: df[c].iloc[0]
+        for c in group_cols
+    }
+
+    wide_df = (
+        df.pivot_table(
+            index=group_cols + ["target_date"],
+            columns="feature_id",
+            values="feature_residual",
+            aggfunc="first"
+        )
+        .reset_index()
+    )
+
+    X = (
+        wide_df
+        .drop(columns=group_cols + ["target_date"])
+        .select_dtypes(include=[np.number])
+        .fillna(0)
+    )
+
+    corr = X.corr().abs().fillna(0)
+    distance = 1 - corr
+
+    linkage = sch.linkage(
+        squareform(distance.values, checks=False),
+        method="average"
+    )
+
+    labels = sch.fcluster(
+        linkage,
+        t=0.2,
+        criterion="distance"
+    )
+
+    cluster_map = pd.DataFrame({
+        **group_values,
+        "feature_id": X.columns,
+        "cluster": labels
+    })
+
+    return cluster_map
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+
+
+
+
+
+ij = initial_joined_df.alias("ij")
+c_df = clustering.alias("c")
     
+conditions = []
+
+for col_nam in act_cols:
+    # Automatically map target_* -> feature_*
+    conditions.append(
+        col(f"ij.{col_nam}") == col(f"c.{col_nam}")
+    )
+# Always join on the dates
+conditions.append(
+    col(f"ij.feature_id") ==
+    col(f"c.feature_id")
+)
+
+join_cond = reduce(operator.and_, conditions)
+
+data_w_cluster = ij.join(
+    c_df,
+    join_cond, 'inner'
+).select(*[col(f"ij.{c}") for c in ij.columns],c_df['cluster'])
+
+if 'series' in grp_cols:
+    cluster_corr_w = Window.partitionBy("series", "cluster").orderBy(desc("max_corr"))
+
+    data_distinct = data_w_cluster.select("series","feature_id","cluster","max_corr").distinct()
+
+    data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
+
+    data_filtered = data_distinct.filter(col("cluster_rank")<=3)
+
+    ## joining remaining features w/ original data
+    df = data_filtered.alias('df')
+
+    post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['series'],df['max_corr'])
+
+    ## ranking series within clusters
+    ranked_w = Window. partitionBy("series").orderBy(desc('max_corr'))
+
+    post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
+
+else:
+    cluster_corr_w = Window.partitionBy("cluster").orderBy(desc("max_corr"))
+
+    data_distinct = data_w_cluster.select("feature_id","cluster","max_corr").distinct()
+
+    data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
+
+    data_filtered = data_distinct.filter(col("cluster_rank")<=3)
+
+    ## joining remaining features w/ original data
+    df = data_filtered.alias('df')
+
+    post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['max_corr'])
+
+    ## ranking w/o series within clusters
+    ranked_w = Window.orderBy(desc('max_corr'))
+
+    post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))    
+
+
+
+## select the top x features per ACT group & select their ideal lag
+grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
+
+## create rec_lag flag and stable flag
+w = Window.partitionBy(*grp_cols).orderBy("Lag").rowsBetween(-1,1)
+ccf_filtered = (
+    ccf_filtered
+    .withColumn("rec_lag", when(col("abs_corr")==col("max_corr"), lit(1)).otherwise(lit(0)))
+    .withColumn("rolling_corr_avg", mean(col("Correlation")).over(w))
+    .withColumn("rolling_corr_std", stddev(col("Correlation")).over(w))
+    .withColumn("stable_flag",
+        when(
+            (col("Correlation") >= col("rolling_corr_avg") - col("rolling_corr_std")) &
+            (col("Correlation") <= col("rolling_corr_avg") + col("rolling_corr_std")),
+            lit(1)
+        ).otherwise(lit(0))
+    )
+)
+
+## filtering for only records with the rec lag and stable period flags as true
+ccf_filtered = ccf_filtered.filter(
+    (col("rec_lag")==1) & (col("stable_flag")==1)
+)
+
+
+w_a = Window.partitionBy(*ACT_GRP_COLS).orderBy(desc("max_corr"))
+
+ccf_filtered = ccf_filtered.withColumn("rank", dense_rank().over(w_a))
+
+
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+def top_features(df_f_resid, ccf_filtered, DRV_GRP_COLS, ACT_GRP_COLS):
+    df_f_resid = df_f_resid.withColumn("feature_serie", concat_ws("__", *grp_cols))
+
+    df_ccf_filtered = df_ccf_filtered.withColumn("feature_serie", concat_ws("__", *grp_cols))
+
+    ## creating the feature_id for the feature/serie combinations that persisted after filtering
+    feature_series = df_ccf_filtered.select("feature_serie").distinct()
+    feature_series = feature_series.withColumn("feature_id", row_number().over(Window.orderBy("feature_serie")))
+
+    ## ensuring there is no ambiguity in the joins
+
+    r = df_f_resid.alias("r")
+
+
+    initial_joined_df = feature_series.join(df_ccf_filtered, ["feature_serie"], "left")
+    joined_df = initial_joined_df.join(r, ['feature_serie'], 'inner')\
+        .drop(*[col(f"r.{c}") for c in grp_cols])\
+        .select(*grp_cols, "target_date", "feature_id", "feature_residual" )
+
+
+    schema = StructType(
+        [StructField(c, StringType(), False) for c in grp_cols] +
+        [
+            StructField("feature_id", IntegerType(), False),
+            StructField("cluster", IntegerType(), False)
+        ]
+    )
+
+    clustering = joined_df.groupBy(*act_cols).applyInPandas(corr_clustering, schema=schema)
+
+
+    ij = initial_joined_df.alias("ij")
+    c_df = clustering.alias("c")
+        
+    conditions = []
+
+    for col_nam in act_cols:
+        # Automatically map target_* -> feature_*
+        conditions.append(
+            col(f"ij.{col_nam}") == col(f"c.{col_nam}")
+        )
+    # Always join on the dates
+    conditions.append(
+        col(f"ij.feature_id") ==
+        col(f"c.feature_id")
+    )
+
+    join_cond = reduce(operator.and_, conditions)
+
+    data_w_cluster = ij.join(
+        c_df,
+        join_cond, 'inner'
+    ).select(*[col(f"ij.{c}") for c in ij.columns],c_df['cluster'])
+
+    if 'series' in grp_cols:
+        cluster_corr_w = Window.partitionBy("series", "cluster").orderBy(desc("max_corr"))
+
+        data_distinct = data_w_cluster.select("series","feature_id","cluster","max_corr").distinct()
+
+        data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
+
+        data_filtered = data_distinct.filter(col("cluster_rank")<=3)
+
+        ## joining remaining features w/ original data
+        df = data_filtered.alias('df')
+
+        post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['series'],df['max_corr'])
+
+        ## ranking series within clusters
+        ranked_w = Window. partitionBy("series").orderBy(desc('max_corr'))
+
+        post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))
+
+    else:
+        cluster_corr_w = Window.partitionBy("cluster").orderBy(desc("max_corr"))
+
+        data_distinct = data_w_cluster.select("feature_id","cluster","max_corr").distinct()
+
+        data_distinct = data_distinct.withColumn("cluster_rank", row_number().over(cluster_corr_w))
+
+        data_filtered = data_distinct.filter(col("cluster_rank")<=3)
+
+        ## joining remaining features w/ original data
+        df = data_filtered.alias('df')
+
+        post_cluster_filtering = df.join(ij, ['feature_id'], 'inner').drop(df['max_corr'])
+
+        ## ranking w/o series within clusters
+        ranked_w = Window.orderBy(desc('max_corr'))
+
+        post_cluster_filtering = post_cluster_filtering.withColumn("feature_rank", dense_rank().over(ranked_w))    
+
+
+
     ## select the top x features per ACT group & select their ideal lag
     grp_cols = list(dict.fromkeys(DRV_GRP_COLS + ACT_GRP_COLS))
 
