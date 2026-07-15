@@ -43,6 +43,30 @@ from functools import reduce
 
 # MARKDOWN ********************
 
+# ## Setting which processes to run
+
+# CELL ********************
+
+# Topline True or False for Topline vs Middle run
+Topline = True
+
+## Declaring which feature selection processes run 
+    # ElasticNetCV -> Classical Statistical Models
+    # XGBoost -> ML Models
+    # DL -> DL Models
+elasticnet_run = True
+xgboost_run = False
+dl_run = False
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
 # ## Data Processing / Prep Methods
 
 # MARKDOWN ********************
@@ -642,16 +666,6 @@ def dl_calc_corr(pdf):
 
 # CELL ********************
 
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 ## BASE DIRECTORY FOR ALL OUTPUTS
 excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 
@@ -670,13 +684,14 @@ T_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
 
 
 T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
-T_feature_diagnostics_file = excel_base_dir + "topline_feature_diagnostics.xlsx"
-T_selected_feature_file = excel_base_dir + "topline_selected_features.xlsx"
 
-T_xgboost_diagnostics_file = excel_base_dir + "topline_xgboost_feature_diagnostics.xlsx"
-T_xgboost_selected_feature_file = excel_base_dir + "topline_xgboost_selected_feature.xlsx"
+T_feature_diagnostics_file = excel_base_dir + "Topline/topline_feature_diagnostics.xlsx"
+T_selected_feature_file = excel_base_dir + "Topline/topline_selected_features.xlsx"
 
-T_dl_selected_feature_file = excel_base_dir + "topline_dl_selected_feature.xlsx"
+T_xgboost_diagnostics_file = excel_base_dir + "Topline/topline_xgboost_feature_diagnostics.xlsx"
+T_xgboost_selected_feature_file = excel_base_dir + "Topline/topline_xgboost_selected_feature.xlsx"
+
+T_dl_selected_feature_file = excel_base_dir + "Topline/topline_dl_selected_feature.xlsx"
 
 
 ## MIDDLE
@@ -693,11 +708,11 @@ M_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
 
 
 M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
-M_feature_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_feature_diagnostics.xlsx"
-M_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_selected_features.xlsx"
+M_feature_diagnostics_file = excel_base_dir + "Middle/middle_feature_diagnostics.xlsx"
+M_selected_feature_file = excel_base_dir + "Middle/middle_selected_features.xlsx"
 
-M_xgboost_diagnostics_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_feature_diagnostics.xlsx"
-M_xgboost_selected_feature_file = "/lakehouse/default/Files/Automated_Driver_Analysis/middle_xgboost_selected_features.xlsx"
+M_xgboost_diagnostics_file = excel_base_dir + "Middle/middle_xgboost_feature_diagnostics.xlsx"
+M_xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_selected_features.xlsx"
 
 M_dl_selected_feature_file = excel_base_dir + "middle_dl_selected_feature.xlsx"
 
@@ -716,7 +731,6 @@ driver_table = "Sales_Forecasting.silver.compiled_drivers"
 
 # CELL ********************
 
-Topline = True
 
 if Topline:
     series = T_series
@@ -770,9 +784,7 @@ elasticnet_init_features = 15
 xgboost_init_features = 200
 dl_init_features = 80
 
-elasticnet_run = False
-xgboost_run = False
-dl_run = True
+
 
 # METADATA ********************
 
@@ -785,17 +797,13 @@ dl_run = True
 
 # #### Reading Data
 
-# MARKDOWN ********************
-
-# # **THERE IS A TEMP FILTER IN PLACE ON ACTUALS **
-
 # CELL ********************
 
 # ORIGINAL / BASE LEVEL DRIVERS
 compiled_drivers = spark.read.table(driver_table).select("Country","Indicator","Region","Date","Value")
 
 # ACTUALS TABLE
-data = spark.read.table(actuals_table).filter(col('Product_Category').isin('ALU',"SCREWS")).withColumnRenamed(initial_target_col,target_col)
+data = spark.read.table(actuals_table).withColumnRenamed(initial_target_col,target_col)
 ## aggregating based on the ACT GRP COLS defined
 data = data.groupBy(*ACT_GRP_COLS,"Date").agg(sum(target_col).alias(target_col))
 
@@ -1434,7 +1442,7 @@ if elasticnet_run:
 
 
 
-    results_elasticnet = results_w_col.filter(col('rank')<=elasticnet_init_features).drop('rank')
+    results_elasticnet = results_w_col.filter(col('feature_rank')<=elasticnet_init_features).drop('feature_rank')
 
     feature_diagnostics = (
         results_elasticnet
@@ -1742,7 +1750,7 @@ if xgboost_run:
     # RUN — distributed across Spark executors, one fit per series
     # ============================================================
 
-    results_xgb = results_w_col.filter(col('rank')<=xgboost_init_features).drop('rank')
+    results_xgb = results_w_col.filter(col('feature_rank')<=xgboost_init_features).drop('feature_rank')
 
 
     xgb_feature_diagnostics = (
