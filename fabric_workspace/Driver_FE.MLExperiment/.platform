@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "MLExperiment",
+    "displayName": "Driver_FE"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "373495e1-2955-b309-4bd0-a7ee387d4e46"
+  }
+}

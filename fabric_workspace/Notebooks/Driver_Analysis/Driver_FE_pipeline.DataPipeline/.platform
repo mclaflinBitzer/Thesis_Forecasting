@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "Driver_FE_pipeline"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "c9651a86-7e60-9898-44f5-d785c7dafb22"
+  }
+}

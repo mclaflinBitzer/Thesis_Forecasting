@@ -20,6 +20,18 @@
 # META   }
 # META }
 
+# CELL ********************
+
+df = spark.read.table('Sales_Forecasting.bronze.Raw_Analyse_Sales_BPC')
+display(df.limit(100))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
 # # Data Exploration & Quality Assessment Framework
@@ -1233,7 +1245,7 @@ def adf_test(df):
             continue
 
         # -----------------------------------------
-        # NEW: safe ADF execution
+        # Safe ADF execution
         # -----------------------------------------
         try:
             adf_stat, p_value, *_ = adfuller(ts)
@@ -1259,7 +1271,7 @@ def adf_test(df):
             })
 
     # -----------------------------------------
-    # SAFE conversion to Spark
+    # Conversion to Spark
     # -----------------------------------------
     adf_schema = StructType([
         StructField("Series", StringType(), False),
@@ -1371,8 +1383,6 @@ def kpss_test(df):
                 "n_obs": n_obs,
                 "kpss_stat": float(kpss_stat),
                 "p_value": float(p_value),
-
-                # NOTE:
                 # KPSS NULL = Stationary
 
                 "stationarity_flag":
@@ -1588,7 +1598,7 @@ all_stats = adf_stats_clean\
 
 # CELL ********************
 
-df = all_stats  # replace with your stationarity results dataframe
+df = all_stats  
 
 # -----------------------------
 # Step 1: Binary stationarity signals

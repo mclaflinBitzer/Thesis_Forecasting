@@ -105,6 +105,17 @@ for col in year_cols:
     )
 
 
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 # -----------------------------------------------------------------------------
 # UNPIVOT / MELT
 # -----------------------------------------------------------------------------
@@ -132,6 +143,9 @@ df_unpivot["Value"] = pd.to_numeric(
     df_unpivot["Value"],
     errors="coerce"
 )
+
+df_unpivot = df_unpivot.dropna(subset=['Value'])
+
 
 # -----------------------------------------------------------------------------
 # GROUP BY COUNTRY + DATE
@@ -170,43 +184,6 @@ df_grouped = df_grouped[
 
 # CELL ********************
 
-## create world grouping
-df_world = df_grouped.groupby(["Date"],as_index=False)["Value"].sum()
-df_world["Country"] = "World"
-df_world["Indicator"] = "HVAC"
-
-df_world = df_world[["Country", "Indicator", "Date", "Value"]]
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# -----------------------------------------------------------------------------
-# APPEND WORLD DATAFRAME
-# Assumes HVAC_GD_World already exists
-# -----------------------------------------------------------------------------
-
-final_df = pd.concat(
-    [df_grouped, df_world],
-    ignore_index=True
-)
-
-final_df.head()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 spark_schema = StructType([
                     StructField("Country", StringType(), False),
                     StructField("Indicator", StringType(), False),
@@ -223,6 +200,7 @@ spark_schema = StructType([
 
 # CELL ********************
 
+final_df = df_grouped
 spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # METADATA ********************
@@ -234,6 +212,9 @@ spark_df = spark.createDataFrame(final_df, schema=spark_schema)
 
 # CELL ********************
 
+from pyspark.sql.functions import col
+
+spark_df = spark_df.filter(~(col("Country")=="Grand Total"))
 driver_time_bounds = (
                         spark_df
                                 .filter(col("Value").isNotNull() & ~isnan(col("Value")))
@@ -276,16 +257,6 @@ filled_df = df_full.withColumn(
 # CELL ********************
 
 filled_df.write.format("delta").mode("overwrite").saveAsTable("Sales_Forecasting.bronze.DRV_HVAC")
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 

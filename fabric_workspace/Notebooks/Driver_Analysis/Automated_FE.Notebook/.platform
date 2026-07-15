@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
     "type": "Notebook",
-    "displayName": "Topline_Correlation"
+    "displayName": "Automated_FE"
   },
   "config": {
     "version": "2.0",
-    "logicalId": "0bc9818e-9d7f-b329-4377-d97d9dd1be11"
+    "logicalId": "bd5e41ba-031c-aacc-42d0-aa9fcd851f40"
   }
 }
