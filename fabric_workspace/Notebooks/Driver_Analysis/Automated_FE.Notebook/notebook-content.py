@@ -54,8 +54,8 @@ Topline = True
     # ElasticNetCV -> Classical Statistical Models
     # XGBoost -> ML Models
     # DL -> DL Models
-elasticnet_run = True
-xgboost_run = False
+elasticnet_run = False
+xgboost_run = True
 dl_run = False
 
 # METADATA ********************
@@ -685,8 +685,8 @@ T_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
 
 T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
 
-T_feature_diagnostics_file = excel_base_dir + "Topline/topline_feature_diagnostics.xlsx"
-T_selected_feature_file = excel_base_dir + "Topline/topline_selected_features.xlsx"
+T_feature_diagnostics_file = excel_base_dir + "Topline/topline_ENCV_feature_diagnostics.xlsx"
+T_selected_feature_file = excel_base_dir + "Topline/topline_ENCV_selected_features.xlsx"
 
 T_xgboost_diagnostics_file = excel_base_dir + "Topline/topline_xgboost_feature_diagnostics.xlsx"
 T_xgboost_selected_feature_file = excel_base_dir + "Topline/topline_xgboost_selected_feature.xlsx"
