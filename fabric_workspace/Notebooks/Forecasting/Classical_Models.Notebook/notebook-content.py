@@ -38,80 +38,19 @@ from pyspark.sql.types import *
 
 # CELL ********************
 
-## BASE DIRECTORY FOR ALL OUTPUTS
-excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
-
-
-## TOPLINE
-T_series = ['series']
-T_initial_target_col = "Quantity"
-
-T_DRV_GRP_COLS = ['Indicator']
-T_ACT_GRP_COLS = ['Product_Category','series']
-
-T_cols = list(dict.fromkeys(T_ACT_GRP_COLS + T_DRV_GRP_COLS))
-
-T_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
-T_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-
-
-T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
-
-T_feature_diagnostics_file = excel_base_dir + "Topline/topline_ENCV_feature_diagnostics.xlsx"
-T_selected_feature_file = excel_base_dir + "Topline/topline_ENCV_selected_features.xlsx"
-
-T_xgboost_diagnostics_file = excel_base_dir + "Topline/topline_xgboost_feature_diagnostics.xlsx"
-T_xgboost_selected_feature_file = excel_base_dir + "Topline/topline_xgboost_selected_feature.xlsx"
-
-T_dl_selected_feature_file = excel_base_dir + "Topline/topline_dl_selected_feature.xlsx"
-
-
-## MIDDLE
-M_series = ['series']
-M_initial_target_col = 'Quantity'
-
-M_DRV_GRP_COLS = ['Region','Indicator']
-M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
-
-M_cols = list(dict.fromkeys(M_ACT_GRP_COLS + M_DRV_GRP_COLS))
-
-M_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
-M_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-
-
-M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
-M_feature_diagnostics_file = excel_base_dir + "Middle/middle_feature_diagnostics.xlsx"
-M_selected_feature_file = excel_base_dir + "Middle/middle_selected_features.xlsx"
-
-M_xgboost_diagnostics_file = excel_base_dir + "Middle/middle_xgboost_feature_diagnostics.xlsx"
-M_xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_selected_features.xlsx"
-
-M_dl_selected_feature_file = excel_base_dir + "middle_dl_selected_feature.xlsx"
-
-
-## shared
-col_renamed = {"Quantity":"target_value","Value":"feature_value"}
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 ## BASELINE output directories
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
 
 Topline = False
-drivers_used = False
 rerun_historical_forecasts = True
-ets_forecast = True
+ets_run = False
+arimax_run = False
+driver_status = "No_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 
+if driver_status == "No_Drivers":
+    drivers_used = False
+else:
+    drivers_used = True
 
 if Topline:
 
@@ -122,7 +61,9 @@ if Topline:
     ACT_GRP_COLS = ['Product_Category','series']
 
     ## OUTPUT DIRECTORIES
-    Holts_dir = parquet_dir + "/Topline/Holts_Output.parquet"
+    parquet_dir = parquet_dir + "/Topline/"
+    Holts_dir = parquet_dir + "No_Drivers/Holts_Output.parquet"
+    Arimax_dir = parquet_dir + "/" + driver_status + "/Arimax_Output.parquet"
 
 else:
 
@@ -133,7 +74,9 @@ else:
     ACT_GRP_COLS = ['Product_Category', 'Region','series']
 
     ## OUTPUT DIRECTORIES
-    Holts_dir = parquet_dir + "/Middle/Holts_Output.parquet"
+    parquet_dir = parquet_dir + "/Middle/"
+    Holts_dir = parquet_dir + "No_Drivers/Holts_Output.parquet"
+    Arimax_dir = parquet_dir + "/" + driver_status + "/Arimax_Output.parquet"
 
 
 # SHARED PARAMETERS
@@ -168,46 +111,60 @@ actuals = spark.read.table(actuals_table).withColumnRenamed(initial_target_col, 
 
 # MARKDOWN ********************
 
-# ### ARIMAX Forecasting
+# #### Adding FH periods to actuals data
 
 # CELL ********************
 
-from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.stattools import adfuller
-from itertools import product
-
-
-
-def fit_arimax(pdf):
+def add_future_months(df, ACT_GRP_COLS, date_col='Date', horizon=18):
     """
-    pdf must contain: Date, target_col, and the SELECTED driver columns already
-    pivoted wide, PLUS future rows (Date > last actual date) with driver values
-    populated (from your pre-forecasted driver sources) and target_col = NaN.
-    This lets exog be sliced cleanly into in-sample vs. forecast-period.
+        add future month records for each unique series
+        only for actuals data without driver info
     """
 
-    pdf = pdf.sort_values("Date").reset_index(drop=True)
-    id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
+    df = df.withColumn(date_col, to_date(col(date_col)))
+    df = df.na.fill({'Value':0})
 
-    driver_cols = [c for c in pdf.columns if c not in [*ACT_GRP_COLS, "Date", target_col]]
+    # gathering the 'last date' per target series
+    last_dates = (
+        df.groupBy(*ACT_GRP_COLS)
+        .agg(max(date_col).alias('last_date'))
+    )
+ 
 
-    in_sample = pdf[pdf[target_col].notna()].reset_index(drop=True)
-    future = pdf[pdf[target_col].isna()].reset_index(drop=True)
+    ## Generating future horizon months
+    future = (
+        last_dates
+        .withColumn('offset', explode(sequence(lit(1), lit(horizon))))
+        .withColumn(date_col, add_months(col('last_date'), col('offset')))
+        .drop('last_date','offset')
+    )
 
-    # Historical rerun vs not based on parameter status
-    if rerun_historical_forecasts:
-        train_ends = range(MIN_TRAIN, len(in_sample)+1, STEP_SIZE)
-    else:
-        train_ends = [len(in_sample)]
+    missing_cols = [c for c  in df.columns if c not in ACT_GRP_COLS + [date_col]]
 
-    for train_end in train_ends:
-        train_y = y.iloc[:train_end]
+    for c in missing_cols:
+        future = future.withColumn(c, lit(None).cast(df.schema[c].dataType))
 
-        future_exog = exog_train.iloc[train_end: train_end+FORECAST_HORIZON]
+    # matching original schema/order
+    future = future.select(df.columns)
 
-        forecast_dates = (in_sample['Date'].iloc[train_end:train_end+FORECAST_HORIZON])
-        
+    return df.unionByName(future)
 
+
+actuals_fh_populated = add_future_months(actuals, ACT_GRP_COLS)
+display(actuals_fh_populated.orderBy(desc('Date')).limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### SARIMAX Forecasting
+
+# CELL ********************
 
 
 # METADATA ********************
@@ -219,20 +176,235 @@ def fit_arimax(pdf):
 
 # CELL ********************
 
-arimax_schema = StructType(
-    [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
-    [
-        StructField("Training_End_Date", DateType(), False),
-        StructField("Forecast_Horizon", IntegerType(), False),
-        StructField("Forecaster", StringType(), False),
-        StructField("Forecast", DoubleType(), True),
-        StructField("Forecast_Lower", DoubleType(), True),
-        StructField("Forecast_Upper", DoubleType(), True),
-        StructField("best_order", StringType(), True),
-        StructField("aic", DoubleType(), True)
-    ]
-)
 
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### ARIMAX Forecasting
+
+# CELL ********************
+
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.stattools import adfuller
+from itertools import product
+
+
+# ==========================================================
+# ARIMA / ARIMAX Model
+# ==========================================================
+
+def _fit_and_forecast(train, future, driver_cols, drivers_used, id_vals, driver_status):
+    """
+    Fits ARIMA/ARIMAX on `train` and forecasts FORECAST_HORIZON steps
+    to align with `future`. Returns an output DataFrame, or None if
+    fitting failed / future window is short.
+    """
+    if len(future) < FORECAST_HORIZON:
+        return None
+
+    # Prepare target
+    y = pd.to_numeric(train[target_col], errors="coerce")
+
+    # Prepare drivers
+    exog_train = None
+    exog_future = None
+    if drivers_used:
+        exog_train = train[driver_cols].apply(pd.to_numeric, errors="coerce")
+        exog_future = future[driver_cols].apply(pd.to_numeric, errors="coerce")
+
+        medians = exog_train.median()
+        exog_train = exog_train.fillna(medians)
+        exog_future = exog_future.fillna(medians)
+
+    # --------------------------------------------------
+    # Determine differencing order
+    # --------------------------------------------------
+    d = 0
+    series = y.copy()
+    while d < 2:
+        try:
+            p_value = adfuller(series.dropna())[1]
+        except Exception:
+            break
+        if p_value < 0.05:
+            break
+        series = series.diff()
+        d += 1
+
+    # --------------------------------------------------
+    # Grid Search
+    # --------------------------------------------------
+    best_model = None
+    best_order = None
+    best_aic = np.inf
+
+    for p, q in product(range(4), range(3)):  # solution matrix of (p, q) combos
+        try:
+            model_kwargs = {"order": (p, d, q)}
+            if drivers_used:
+                model_kwargs["exog"] = exog_train
+
+            model = ARIMA(y, **model_kwargs).fit()
+
+            if model.aic < best_aic:
+                best_aic = model.aic
+                best_order = (p, d, q)
+                best_model = model
+
+        except Exception:
+            continue
+
+    if best_model is None:
+        return None
+
+    # --------------------------------------------------
+    # Forecast
+    # --------------------------------------------------
+    forecast_kwargs = {"steps": FORECAST_HORIZON}
+    if drivers_used:
+        forecast_kwargs["exog"] = exog_future
+
+    forecast_result = best_model.get_forecast(**forecast_kwargs)
+    forecast = forecast_result.predicted_mean
+    conf_int = forecast_result.conf_int()
+
+    # --------------------------------------------------
+    # Output
+    # --------------------------------------------------
+    out = pd.DataFrame({
+        **{c: id_vals[c] for c in ACT_GRP_COLS},
+        "Training_End_Date": train["Date"].iloc[-1],
+        "Forecast_Horizon": range(1, FORECAST_HORIZON + 1),
+        "Forecaster": "ARIMAX",
+        "Drivers_Used_Flag": driver_status,
+        "Date": future["Date"].astype(str).values,
+        "Forecast": forecast.values,
+        "Forecast_Lower": conf_int.iloc[:, 0].values,
+        "Forecast_Upper": conf_int.iloc[:, 1].values,
+        "best_order": str(best_order),
+        "aic": best_aic,
+    })
+
+
+    return out
+
+
+def fit_arimax(pdf: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fits either ARIMA or ARIMAX depending on whether driver variables exist.
+
+    Behavior:
+        rerun_historical_forecasts = True
+            Additionally performs rolling historical backtests.
+        rerun_historical_forecasts = False
+            Skips backtests.
+
+    Regardless of rerun_historical_forecasts, this ALWAYS produces one
+    forward-looking forecast fit on the full in-sample history, predicting
+    into the rows where target_col is NaN (e.g. your 18-month extended
+    actuals window used to carry forward external drivers).
+    """
+    # Sort observations
+    pdf = pdf.sort_values("Date").reset_index(drop=True)
+
+    id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
+
+    # Determine driver columns
+    driver_cols = [c for c in pdf.columns if c not in [*ACT_GRP_COLS, "Date", target_col]]
+    drivers_used = len(driver_cols) > 0
+
+    # Historical observations (non-null target)
+    in_sample = pdf[pdf[target_col].notna()].reset_index(drop=True)
+
+    if len(in_sample) < MIN_TRAIN:
+        return pd.DataFrame()
+
+    all_outputs = []
+
+    # --------------------------------------------------
+    # Optional rolling historical backtests
+    # --------------------------------------------------
+    if rerun_historical_forecasts:
+        train_ends = range(MIN_TRAIN, len(in_sample) + 1, STEP_SIZE)
+
+        for train_end in train_ends:
+            train = in_sample.iloc[:train_end].copy()
+            future = in_sample.iloc[train_end: train_end + FORECAST_HORIZON].copy()
+
+            out = _fit_and_forecast(
+                train, future, driver_cols, drivers_used, id_vals, driver_status
+            )
+            if out is None:
+                continue
+
+            all_outputs.append(out)
+
+    # --------------------------------------------------
+    # ALWAYS run the true forward-looking forecast
+    # (fit on full in-sample history, forecast into the
+    # NaN-target rows from the 18-month extended window)
+    # --------------------------------------------------
+    future_actuals = pdf[pdf[target_col].isna()].reset_index(drop=True).head(FORECAST_HORIZON)
+
+    future_out = _fit_and_forecast(
+        in_sample, future_actuals, driver_cols, drivers_used, id_vals, driver_status
+    )
+
+    if future_out is not None:
+        all_outputs.append(future_out)
+
+    # ------------------------------------------------------
+    # Return Results
+    # ------------------------------------------------------
+    if len(all_outputs) == 0:
+        return pd.DataFrame()
+
+    return pd.concat(all_outputs, ignore_index=True)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+if arimax_run:
+    # ==========================================================
+    # Output Schema
+    # ==========================================================
+
+    arimax_schema = StructType(
+        [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
+        [
+            StructField("Training_End_Date", DateType(), False),
+            StructField("Forecast_Horizon", IntegerType(), False),
+            StructField("Forecaster", StringType(), False),
+            StructField("Drivers_Used_Flag", StringType(), False),
+            StructField("Date", StringType(), False),
+            StructField("Forecast", DoubleType(), True),
+            StructField("Forecast_Lower", DoubleType(), True),
+            StructField("Forecast_Upper", DoubleType(), True),
+            StructField("best_order", StringType(), True),
+            StructField("aic", DoubleType(), True),
+        ]
+    )
+
+
+
+    arimax_output = actuals_fh_populated.groupBy(*ACT_GRP_COLS).applyInPandas(fit_arimax, schema=arimax_schema).cache()
+
+    if rerun_historical_forecasts:
+        arimax_output.write.mode('overwrite').parquet(Arimax_dir)
+    else:
+        arimax_output.write.mode('append').parquet(Arimax_dir)
 
 
 # METADATA ********************
@@ -372,7 +544,7 @@ def fit_ets(pdf):
 
 # CELL ********************
 
-if ets_forecasts:
+if ets_run:
     ets_schema = StructType(
         [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
         [
@@ -391,28 +563,16 @@ if ets_forecasts:
 
     ets_forecasts = (
         actuals
-        #.filter(col('series')=="SCREWS___APAC")
-        .filter(col(target_col).isNotNull())
+        .fillna({target_col:0})
         .groupBy(*ACT_GRP_COLS)
         .applyInPandas(fit_ets, schema=ets_schema)
-    )
+    ).cache()
 
 
     if rerun_historical_forecasts:
         ets_forecasts.write.mode('overwrite').parquet(Holts_dir)
     else:
         ets_forecasts.write.mode('append').parquet(Holts_dir)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(ets_forecasts)
 
 # METADATA ********************
 
