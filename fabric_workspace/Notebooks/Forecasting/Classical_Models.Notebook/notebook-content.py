@@ -28,6 +28,8 @@ import pandas as pd
 import numpy as np
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
+import operator
+from functools import reduce
 
 # METADATA ********************
 
@@ -38,21 +40,22 @@ from pyspark.sql.types import *
 
 # CELL ********************
 
+## BASELINE SELECTED DRIVER DIRECTORIES
+manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
+automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 ## BASELINE output directories
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
 
-Topline = False
+Topline = True
 rerun_historical_forecasts = True
-ets_run = True
+ets_run = False
 arimax_run = True
-sarimax_run = True
+sarimax_run = False
 prophet_run = True
-driver_status = "No_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 
-if driver_status == "No_Drivers":
-    drivers_used = False
-else:
-    drivers_used = True
+
+
 
 if Topline:
 
@@ -61,6 +64,13 @@ if Topline:
 
     DRV_GRP_COLS = ['Indicator']
     ACT_GRP_COLS = ['Product_Category','series']
+
+    ## DRIVER DIRECTORY
+    if driver_status == 'Manual_Drivers':
+        selected_driver_dir = manual_features + "final_features_topline.csv"
+    else:
+        selected_driver_dir = automated_features + "Topline/topline_ENCV_selected_features.xlsx"
+
 
     ## OUTPUT DIRECTORIES
     parquet_dir = parquet_dir + "/Topline/"
@@ -77,6 +87,13 @@ else:
     DRV_GRP_COLS = ['Region','Indicator']
     ACT_GRP_COLS = ['Product_Category', 'Region','series']
 
+    ## DRIVER DIRECTORY
+    if driver_status == 'Manual_Drivers':
+        selected_driver_dir = manual_features + "final_features_middle.csv"
+    else:
+        selected_driver_dir = automated_features + "Middle/middle_ENCV_selected_features.xlsx"
+
+
     ## OUTPUT DIRECTORIES
     parquet_dir = parquet_dir + "/Middle/"
     Holts_dir = parquet_dir + "No_Drivers/Holts_Output.parquet"
@@ -86,6 +103,7 @@ else:
 
 
 # SHARED PARAMETERS
+
 
 ## Model Parameters
 FORECAST_HORIZON = 18
@@ -97,6 +115,14 @@ STEP_SIZE = 1 # move origin forward 1 months after each model iteration
 driver_table = "Sales_Forecasting.silver.compiled_drivers"
 target_col = 'Value'
 
+
+## SETTING DRIVER STATUS & WHICH DRIVERS TO REFERENCE
+if driver_status == "No_Drivers":
+    drivers_used = False
+else:
+    drivers_used = True
+    ets_run = False         # this cannot run with drivers
+
 # METADATA ********************
 
 # META {
@@ -106,7 +132,9 @@ target_col = 'Value'
 
 # CELL ********************
 
-test.columns
+# test = spark.read.parquet(Prophet_dir)
+# display(test.groupBy(*ACT_GRP_COLS,'Date').agg(avg("Forecast").alias("Forecast")))
+# display(test.groupBy(*ACT_GRP_COLS).agg(max("Training_End_Date")))
 
 # METADATA ********************
 
@@ -131,19 +159,6 @@ test.columns
 #         .withColumn("series", concat(col('series'), lit("_FORECAST")))
 #     )
 # )
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# test = spark.read.parquet(Prophet_dir)
-# display(test.groupBy(*ACT_GRP_COLS,'Date').agg(avg("Forecast").alias("Forecast")))
-# display(test.groupBy(*ACT_GRP_COLS).agg(max("Training_End_Date")))
 
 # METADATA ********************
 
@@ -205,7 +220,136 @@ def add_future_months(df, ACT_GRP_COLS, date_col='Date', horizon=18):
 
 
 actuals_fh_populated = add_future_months(actuals, ACT_GRP_COLS)
-display(actuals_fh_populated.orderBy(desc('Date')).limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### Joining actuals_fh with driver data
+
+# CELL ********************
+
+if drivers_used:
+    ## Aggregating the drivers based upon the DRV GRP COLS defined 
+    compiled_drivers = spark.read.table(driver_table)
+    aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+
+    # if Indicator is the only value in DRV GRP COLS then the data will be aggregated at a lower level than world
+        # this ensures that "WORLD" level aggregated drivers are added to the aggregated_drivers set
+
+    if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
+        # creates world level drivers
+        world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
+        world_agg = world_agg.withColumn("Indicator", concat_ws("__", col("Indicator"), lit("WORLD")))
+
+        
+        # populates the other DRV GRP COLS defined that aren't "Indicator" with the value of "World"
+        for cols in DRV_GRP_COLS:
+            if cols!='Indicator':
+                distinct_vals = compiled_drivers.select(cols).distinct()
+                world_agg = world_agg.crossJoin(distinct_vals)
+                print(f"{cols} to the world agg using cross join of distinct values from the drivers data")
+
+        aggregated_drivers = aggregated_drivers.unionByName(world_agg)
+        
+    else:
+        print('world agg already done')
+
+
+    # READING FILES W/ SELECTED DRIVERS
+    ## Read file handling based on excel or csv files 
+    if 'csv' in selected_driver_dir:
+        print('reading csv')
+        selected_drivers = spark.createDataFrame(
+            pd.read_csv(selected_driver_dir)
+            .drop(columns="Unnamed: 0", errors="ignore")
+        )
+
+    elif 'xlsx' in selected_driver_dir:
+        print('reading excel')
+        selected_drivers = spark.createDataFrame(
+            pd.read_excel(selected_driver_dir)
+            .drop(columns="Unnamed: 0", errors="ignore")
+        )
+    else:
+        raise ValueError(f"Unsupported file type. expected csv or xlsx but received: {selected_driver_dir}")
+
+
+    print(f"selected_driver num distinct records: {selected_drivers.select('Product_Category','Indicator').distinct().count()}")
+    print(f"agg_drivers records: {aggregated_drivers.select('Indicator').distinct().count()}")
+
+    joined_driver_data = (
+        broadcast(selected_drivers)
+        .join(
+            aggregated_drivers,
+            [*DRV_GRP_COLS],
+            'left'
+        )
+    )
+
+
+    # JOINING DATAFRAMES
+
+    print(f"joined records: {joined_driver_data.select('Product_Category','Indicator').distinct().count()}")
+
+    if (selected_drivers.select('Product_Category','Indicator').distinct().count()) != (joined_driver_data.select('Product_Category','Indicator').distinct().count()):
+        raise ValueError("There is a mismatch and the number of combinations has changed post selected driver & aggregated driver join")
+
+    ## creating a driver_date column for the join with actuals to enforce the LAG selected per driver
+    joined_driver_data = (
+        joined_driver_data
+        .withColumn("driver_date", add_months(col('Date'), -col('Lag')))
+        .drop('Date','rec_lag')
+        .withColumnRenamed('Value','driver_value')
+    )
+
+
+    # JOINING ACTUALS AND DRIVERS 
+
+    ## join conditions based on ACT GRP COLS w/o 'series'
+    join_cols = ACT_GRP_COLS.copy()
+    join_cols.remove('series')
+
+    conditions = []
+    for col_name in join_cols:
+        conditions.append(
+            col(f"a.{col_name}")==col(f"d.{col_name}")
+        )
+
+    ## appending date as a join condition
+    conditions.append(
+        col("a.Date")==col("d.driver_date")
+    )
+
+    ## creating the actual conditions
+    join_cond = reduce(operator.and_, conditions)
+
+    ## joining the actuals data with the selected drivers with their data already lagged
+    actuals_w_drivers = (
+        actuals_fh_populated.alias("a")
+        .join(
+            joined_driver_data.alias("d"),
+            join_cond,
+            "left"
+        ).select("a.*", *[col(f"d.{c}") for c in DRV_GRP_COLS if c not in ACT_GRP_COLS], "d.driver_value", "d.Lag")
+    )
+
+    actuals_w_drivers = (
+        actuals_w_drivers
+        .withColumn('feature_col', concat_ws("__", *DRV_GRP_COLS, col("Lag").cast("String")))
+        .drop(*DRV_GRP_COLS, "Lag")
+    )
+
+    actuals_fh_populated = actuals_w_drivers
+    print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
+
+
+
 
 # METADATA ********************
 
@@ -255,8 +399,12 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
             prophet_future[c] = pd.to_numeric(prophet_future[c], errors="coerce")
 
             med = prophet_train[c].median()
+            if pd.isna(med):
+                med=0
             prophet_train[c] = prophet_train[c].fillna(med)
             fut_med = prophet_future[c].median()
+            if pd.isna(fut_med):
+                fut_med=0
             prophet_future[c] = prophet_future[c].fillna(fut_med)
     # ============================================================
 
@@ -351,6 +499,18 @@ def fit_prophet(pdf: pd.DataFrame) -> pd.DataFrame:
     """
 
     pdf = pdf.sort_values("Date").reset_index(drop=True)
+
+    # convert long driver data to wide
+    if 'feature_col' in pdf.columns:
+        pdf = (
+                pdf.pivot_table(
+                    index=ACT_GRP_COLS+['Date',target_col],
+                    columns='feature_col',
+                    values='driver_value',
+                    aggfunc='first'
+                ).reset_index()
+            )
+
     id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
 
     driver_cols = [c for c in pdf.columns if c not in [*ACT_GRP_COLS, "Date", target_col]]
@@ -574,6 +734,17 @@ def fit_sarimax(pdf):
     """
     # Sort observations
     pdf = pdf.sort_values('Date').reset_index(drop=True)
+
+    # convert long driver data to wide
+    if 'feature_col' in pdf.columns:
+        pdf = (
+                pdf.pivot_table(
+                    index=ACT_GRP_COLS+['Date',target_col],
+                    columns='feature_col',
+                    values='driver_value',
+                    aggfunc='first'
+                ).reset_index()
+            )
 
     id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
 
@@ -829,6 +1000,17 @@ def fit_arimax(pdf: pd.DataFrame) -> pd.DataFrame:
     """
     # Sort observations
     pdf = pdf.sort_values("Date").reset_index(drop=True)
+
+    # convert long driver data to wide
+    if 'feature_col' in pdf.columns:
+        pdf = (
+                pdf.pivot_table(
+                    index=ACT_GRP_COLS+['Date',target_col],
+                    columns='feature_col',
+                    values='driver_value',
+                    aggfunc='first'
+                ).reset_index()
+            )
 
     id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
 

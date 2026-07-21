@@ -48,7 +48,7 @@ from functools import reduce
 # CELL ********************
 
 # Topline True or False for Topline vs Middle run
-Topline = True
+Topline = False
 
 ## Declaring which feature selection processes run 
     # ElasticNetCV -> Classical Statistical Models
@@ -717,9 +717,7 @@ M_xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_select
 M_dl_selected_feature_file = excel_base_dir + "middle_dl_selected_feature.xlsx"
 
 
-## shared
-col_renamed = {"Quantity":"target_value","Value":"feature_value"}
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
+
 
 
 # METADATA ********************
@@ -753,7 +751,7 @@ if Topline:
 
 else:
     series = M_series 
-    inital_target_col = M_initial_target_col
+    initial_target_col = M_initial_target_col
 
     DRV_GRP_COLS = M_DRV_GRP_COLS 
     ACT_GRP_COLS = M_ACT_GRP_COLS 
@@ -776,7 +774,6 @@ else:
 
 
 ## shared
-col_renamed = {"Quantity":"target_value","Value":"feature_value"}
 driver_table = "Sales_Forecasting.silver.compiled_drivers"
 target_col = 'Value'
 
@@ -847,8 +844,6 @@ if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
     
 else:
     print('world agg already done')
-
-display(aggregated_drivers.filter(col("Indicator").like("%WORLD")).select("Indicator","Region").distinct().orderBy("Region","Indicator"))
 
 
 # METADATA ********************

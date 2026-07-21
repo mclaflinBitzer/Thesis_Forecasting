@@ -25,6 +25,7 @@
 import pandas as pd
 from pyspark.sql.functions import *
 from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.sql.window import Window
 
 # METADATA ********************
 
@@ -39,6 +40,61 @@ topline_df = pd.read_excel('/lakehouse/default/Files/Driver_Analysis/topline_rec
 middle_df = pd.read_excel('/lakehouse/default/Files/Driver_Analysis/middle_recommended_features.xlsx')
 topline = spark.createDataFrame(topline_df)
 middle = spark.createDataFrame(middle_df)
+
+display(
+    middle
+    .filter(
+        (col('Product_Category')=='ALU') &
+        (col('Region')=='APAC') &
+        (col('Indicator')=='Real_GDP_total_2015_prices')
+    )
+)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+all_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers")
+
+display(
+    all_drivers
+    .filter(
+        #(col('Product_Category')=='ALU') &
+        (col('Region')=='APAC') &
+        (col('Indicator').like('%Real_GDP_total%'))
+    )
+)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+topline = topline.drop('abs_corr','max_corr')
+
+w_t = Window.partitionBy('Product_Category','Indicator')
+topline = topline.withColumn('abs_corr', round(abs(col('Correlation')),4)).withColumn('max_corr', max(col('abs_corr')).over(w_t))
+topline = topline.withColumn('final_test_flag', when(col('max_corr')==col('abs_corr'),lit(1)).otherwise(lit(0)))
+topline = topline.withColumn('rec_lag', col('final_test_flag')).drop('final_test_flag')
+
+
+
+middle = middle.drop('abs_corr','max_corr')
+
+w_m = Window.partitionBy('Product_Category','Region','Indicator')
+middle = middle.withColumn('abs_corr', round(abs(col('Correlation')),4)).withColumn('max_corr', max(col('abs_corr')).over(w_m))
+middle = middle.withColumn('final_test_flag', when(col('max_corr')==col('abs_corr'),lit(1)).otherwise(lit(0)))
+middle = middle.withColumn('rec_lag', col('final_test_flag')).drop('final_test_flag')
+
 
 # METADATA ********************
 
@@ -123,7 +179,6 @@ MAERSK_ELECTRONICS	Engineering_metal_goods_NACE_rv2_25_27_28_Investment_Real_USD
 MAERSK_ELECTRONICS	External_trade_Total_trade
 MAERSK_ELECTRONICS	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 MAERSK_ELECTRONICS	Real_GVA_in_construction
-MAERSK_ELECTRONICS	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_35_3_Value_added_output_Real_USD
 MAERSK_ELECTRONICS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 MAERSK_ELECTRONICS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 MAERSK_ELECTRONICS	Index_of_industrial_production
@@ -156,10 +211,9 @@ SCREWS	Real_GVA_in_construction
 SCREWS	Food_Processing_Plants
 SCREWS	Cold_Storage_Plants
 SCREWS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
-SCREWS	Food_beverages_NACE_rv2_10_11_Investment_Real_USD
 SCREWS	Index_of_industrial_production
 SCREWS	Data_Center
-SCROLLS	Building stock by type: Non residential - number of buildings
+SCROLLS	Building_stock_by_type_Non_residential_number_of_buildings
 SCROLLS	Data_Center
 SCROLLS	Food_Processing_Plants
 SCROLLS	Cold_Storage_Plants
@@ -205,9 +259,9 @@ APAC	ALU	Leisure_Hospitality_Buildings
 APAC	ALU	Stores
 APAC	ALU	Data_Center
 APAC	ALU	Electricity_installed_capacity
-APAC	ALU	Real GDP total (2015 prices)
-APAC	ALU	Greenhouse gas emissions
-APAC	ALU	Meat production, total
+APAC	ALU	Real_GDP_total_2015_prices
+APAC	ALU	Greenhouse_gas_emissions
+APAC	ALU	Meat_production_total
 APAC	ALU	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 APAC	ALU	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 APAC	ALU	Real_GVA_in_construction
@@ -235,7 +289,7 @@ APAC	HEXPV	Stores
 APAC	HEXPV	Manufacturing_NACE_rv2_10_to_33_Investment_Real_USD
 APAC	HEXPV	Food_Processing_Plants
 APAC	HEXPV	Cold_Storage_Plants
-APAC	HEXPV	Electricity, gas & air conditioning, NACE rv2 35_Gross output (sales), Real USD
+APAC	HEXPV	Electricity_gas_air_conditioning_NACE_rv2_35_Gross_output_sales_Real_USD
 APAC	HEXPV	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 APAC	HEXPV	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 APAC	HEXPV	Real_GVA_in_construction
@@ -259,11 +313,11 @@ APAC	PISTON	Index_of_industrial_production
 APAC	SCREWS	Data_Center
 APAC	SCREWS	Food_Processing_Plants
 APAC	SCREWS	Cold_Storage_Plants
-APAC	SCREWS	Greenhouse gas emissions
+APAC	SCREWS	Greenhouse_gas_emissions
 APAC	SCREWS	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_35_3_Investment_Real_USD
 APAC	SCREWS	CO2_emissions
-APAC	SCREWS	Food production index
-APAC	SCREWS	Meat production, total
+APAC	SCREWS	Food_production_index
+APAC	SCREWS	Meat_production_total
 APAC	SCREWS	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 APAC	SCREWS	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 APAC	SCREWS	Real_GVA_in_construction
@@ -286,7 +340,7 @@ APAC	SCROLLS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_par
 APAC	SCROLLS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 APAC	SCROLLS	Index_of_industrial_production
 APAC	SCROLLS	Data_Center
-APAC	SCROLLS	Building stock by type: Non residential - number of buildings
+APAC	SCROLLS	Building_stock_by_type_Non_residential_number_of_buildings
 China	ALU	Leisure_Hospitality_Buildings
 China	ALU	Stores
 China	ALU	International_investment_position_Net_total
@@ -298,7 +352,7 @@ China	ALU	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_35_3_V
 China	ALU	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 China	ALU	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 China	ALU	Index_of_industrial_production
-China	AVP_CDU	Construction, Non residential Building, NACE rv2 41.2/1,part 41.1,part 43_Investment, Real USD
+China	AVP_CDU	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Investment_Real_USD
 China	AVP_CDU	Leisure_Hospitality_Buildings
 China	AVP_CDU	Stores
 China	AVP_CDU	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
@@ -330,9 +384,9 @@ China	MAERSK_COMPRESSOR	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_
 China	MAERSK_COMPRESSOR	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 China	MAERSK_COMPRESSOR	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 China	MAERSK_COMPRESSOR	Index_of_industrial_production
-China	PISTON	Industrial production, excluding Construction, NACE rv2 05 to 39_Gross output (sales), Real USD
-China	PISTON	Manufacturing, NACE rv2 10 to 33_Value-added output, Real USD
-China	PISTON	Whole Economy_Gross Domestic Product, Real USD
+China	PISTON	Industrial_production_excluding_Construction_NACE_rv2_05_to_39_Value_added_output_Real_USD
+China	PISTON	Manufacturing_NACE_rv2_10_to_33_Value_added_output_Real_USD
+China	PISTON	Whole_Economy_Gross_Domestic_Product_Real_USD
 China	PISTON	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 China	PISTON	Wood_wood_products_Pulp_paper_Rubber_plastic_Non_metallic_minerals_NACE_rv2_16_to_17_22_to_23_Industrial_and_building_materials_chartbook_consistent_NACE_rv2_16_to_17_22_to_23
 China	PISTON	Leisure_Hospitality_Buildings
@@ -346,11 +400,11 @@ China	PISTON	Food_beverages_NACE_rv2_10_11_Investment_Real_USD
 China	PISTON	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_35_3_Value_added_output_Real_USD
 China	PISTON	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 China	PISTON	Index_of_industrial_production
-China	SCREWS	Pharmaceuticals, NACE rv2 21_Investment, Real USD
+China	SCREWS	Pharmaceuticals_NACE_rv2_21_Value_added_output_Real_USD
 China	SCREWS	Index_of_industrial_production
 China	SCREWS	HVAC
 China	SCREWS	Data_Center
-China	SCREWS	Meat production, total
+China	SCREWS	Meat_production_total
 China	SCREWS	International_investment_position_Net_total
 China	SCREWS	Special_purpose_machinery_NACE_rv2_28_3_28_4_28_9_Investment_Real_USD
 China	SCREWS	CO2_emissions
@@ -372,7 +426,7 @@ China	SCROLLS	Real_GVA_in_construction
 China	SCROLLS	Food_beverages_NACE_rv2_10_11_Investment_Real_USD
 China	SCROLLS	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_35_3_Value_added_output_Real_USD
 China	SCROLLS	Index_of_industrial_production
-China	SCROLLS	Building stock by type: Non residential - number of buildings
+China	SCROLLS	Building_stock_by_type_Non_residential_number_of_buildings
 EMEA	ALU	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 EMEA	ALU	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 EMEA	ALU	Real_GVA_in_construction
@@ -381,7 +435,7 @@ EMEA	ALU	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_35_3_Va
 EMEA	ALU	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 EMEA	ALU	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 EMEA	ALU	Index_of_industrial_production
-EMEA	AVP_CDU	Building stock by type: Non residential - number of buildings
+EMEA	AVP_CDU	Building_stock_by_type_Non_residential_number_of_buildings
 EMEA	AVP_CDU	Leisure_Hospitality_Buildings
 EMEA	AVP_CDU	Stores
 EMEA	AVP_CDU	Food_Processing_Plants
@@ -423,7 +477,7 @@ EMEA	PISTON	Stores
 EMEA	PISTON	Data_Center
 EMEA	PISTON	Food_Processing_Plants
 EMEA	PISTON	Cold_Storage_Plants
-EMEA	PISTON	Building stock by type: Non residential - number of buildings
+EMEA	PISTON	Building_stock_by_type_Non_residential_number_of_buildings
 EMEA	PISTON	HVAC
 EMEA	PISTON	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 EMEA	PISTON	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
@@ -434,7 +488,7 @@ EMEA	PISTON	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part
 EMEA	PISTON	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 EMEA	PISTON	Index_of_industrial_production
 EMEA	SCREWS	Industrial_production_including_construction_excluding_utilities_NACE_rv2_05_to_33_41_to_43_Carbon_Emissions
-EMEA	SCREWS	Real GVA in manufacturing
+EMEA	SCREWS	Real_GVA_in_manufacturing
 EMEA	SCREWS	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_35_3_Investment_Real_USD
 EMEA	SCREWS	Manufacturing_NACE_rv2_10_to_33_Investment_Real_USD
 EMEA	SCREWS	Data_Center
@@ -453,8 +507,8 @@ EMEA	SCROLLS	Mechanical_engineering_NACE_rv2_28_Gross_output_sales_Real_USD
 EMEA	SCROLLS	Leisure_Hospitality_Buildings
 EMEA	SCROLLS	Stores
 EMEA	SCROLLS	Data_Center
-EMEA	SCROLLS	Building stock by type: Non residential - number of buildings
-EMEA	SCROLLS	Special purpose machinery, NACE rv2 28.3,28.4,28.9_Gross output (sales), Real USD
+EMEA	SCROLLS	Building_stock_by_type_Non_residential_number_of_buildings
+EMEA	SCROLLS	Special_purpose_machinery_NACE_rv2_28_3_28_4_28_9_Gross_output_sales_Real_USD
 EMEA	SCROLLS	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 EMEA	SCROLLS	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 EMEA	SCROLLS	Real_GVA_in_construction
@@ -474,7 +528,8 @@ N.America	ALU	Index_of_industrial_production
 N.America	AVP_CDU	Food_Processing_Plants
 N.America	AVP_CDU	Cold_Storage_Plants
 N.America	AVP_CDU	International_investment_position_Net_total
-N.America	AVP_CDU	Leisure_Hospitality_Buildings & Stores
+N.America	AVP_CDU	Leisure_Hospitality_Buildings
+N.America	AVP_CDU	Stores
 N.America	AVP_CDU	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 N.America	AVP_CDU	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 N.America	AVP_CDU	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
@@ -509,10 +564,10 @@ N.America	MAERSK_ELECTRONICS	Index_of_industrial_production
 N.America	PISTON	Leisure_Hospitality_Buildings
 N.America	PISTON	Stores
 N.America	PISTON	Whole_Economy_Price_of_energy_for_industr
-N.America	PISTON	IT Programming, consultancy & information services, NACE rv2 62 to 63_Gross output (sales), Real USD
+N.America	PISTON	IT_Programming_consultancy_information_services_NACE_rv2_62_to_63_Gross_output_sales_Real_USD
 N.America	PISTON	Index_of_industrial_production
 N.America	PISTON	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
-N.America	PISTON	IT Programming, consultancy & information services, NACE rv2 62 to 63_Value-added output, Real USD
+N.America	PISTON	IT_Programming_consultancy_information_services_NACE_rv2_62_to_63_Value_added_output_Real_USD
 N.America	PISTON	International_investment_position_Net_total
 N.America	PISTON	Food_Processing_Plants
 N.America	PISTON	Cold_Storage_Plants
@@ -526,10 +581,10 @@ N.America	SCREWS	Data_Center
 N.America	SCREWS	Food_Processing_Plants
 N.America	SCREWS	Cold_Storage_Plants
 N.America	SCREWS	International_investment_position_Net_total
-N.America	SCREWS	IT Programming, consultancy & information services, NACE rv2 62 to 63_Value-added output, Real USD
-N.America	SCREWS	Greenhouse gas emissions
+N.America	SCREWS	IT_Programming_consultancy_information_services_NACE_rv2_62_to_63_Value_added_output_Real_USD
+N.America	SCREWS	Greenhouse_gas_emissions
 N.America	SCREWS	HVAC
-N.America	SCREWS	IT Programming, consultancy & information services, NACE rv2 62 to 63_Gross output (sales), Real USD
+N.America	SCREWS	IT_Programming_consultancy_information_services_NACE_rv2_62_to_63_Gross_output_sales_Real_USD
 N.America	SCREWS	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 N.America	SCREWS	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 N.America	SCREWS	Real_GVA_in_construction
@@ -538,7 +593,7 @@ N.America	SCREWS	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to
 N.America	SCREWS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 N.America	SCREWS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 N.America	SCREWS	Index_of_industrial_production
-N.America	SCROLLS	Greenhouse gas emissions
+N.America	SCROLLS	Greenhouse_gas_emissions
 N.America	SCROLLS	International_investment_position_Net_total
 N.America	SCROLLS	Construction_Sector
 N.America	SCROLLS	Data_Center
@@ -550,9 +605,9 @@ N.America	SCROLLS	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_t
 N.America	SCROLLS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 N.America	SCROLLS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 N.America	SCROLLS	Index_of_industrial_production
-N.America	SCROLLS	Building stock by type: Non residential - number of buildings
+N.America	SCROLLS	Building_stock_by_type_Non_residential_number_of_buildings
 S.America	ALU	International_investment_position_Net_total
-S.America	ALU	Greenhouse gas emissions
+S.America	ALU	Greenhouse_gas_emissions
 S.America	ALU	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 S.America	ALU	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
 S.America	ALU	Real_GVA_in_construction
@@ -590,7 +645,7 @@ S.America	HEXPV	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to_
 S.America	HEXPV	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 S.America	HEXPV	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 S.America	HEXPV	Index_of_industrial_production
-S.America	PISTON	IT Programming, consultancy & information services, NACE rv2 62 to 63_Value-added output, Real USD
+S.America	PISTON	IT_Programming_consultancy_information_services_NACE_rv2_62_to_63_Value_added_output_Real_USD
 S.America	PISTON	Castings_NACE_rv2_24_5_Value_added_output_Real_USD
 S.America	PISTON	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
 S.America	PISTON	Mechanical_engineering_NACE_rv2_28_Value_added_output_Real_USD
@@ -600,11 +655,11 @@ S.America	PISTON	Gas_steam_cooling_ice_manufacture_distribution_NACE_rv2_35_2_to
 S.America	PISTON	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Gross_output_sales_Real_USD
 S.America	PISTON	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 S.America	PISTON	Index_of_industrial_production
-S.America	SCREWS	Food & beverages, NACE rv2 10,11_Gross output (sales), Real USD
+S.America	SCREWS	Food_beverages_NACE_rv2_10_11_Gross_output_sales_Real_USD
 S.America	SCREWS	Whole_Economy_Price_of_energy_for_industr
-S.America	SCREWS	Greenhouse gas emissions
+S.America	SCREWS	Greenhouse_gas_emissions
 S.America	SCREWS	Whole_Economy_Producer_Price_Index
-S.America	SCREWS	Meat production, total
+S.America	SCREWS	Meat_production_total
 S.America	SCREWS	Data_Center
 S.America	SCREWS	Food_Processing_Plants
 S.America	SCREWS	Cold_Storage_Plants
@@ -617,7 +672,7 @@ S.America	SCREWS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1
 S.America	SCREWS	Construction_Non_residential_Building_NACE_rv2_41_2_1_part_41_1_part_43_Value_added_output_Real_USD
 S.America	SCREWS	Index_of_industrial_production
 S.America	SCROLLS	International_investment_position_Net_total
-S.America	SCROLLS	Greenhouse gas emissions
+S.America	SCROLLS	Greenhouse_gas_emissions
 S.America	SCROLLS	Whole_Economy_Price_of_energy_for_industr
 S.America	SCROLLS	Data_Center
 S.America	SCROLLS	General_purpose_machinery_NACE_rv2_28_1_28_2_Investment_Real_USD
@@ -680,7 +735,7 @@ num_selected_drivers = topline_drivers.count()
 print(f"number of selected driver records: {num_selected_drivers}")
 
 joined_topline = topline_drivers.join(
-    topline.select('Product_Category','Indicator','Lag'), 
+    topline.filter(col('rec_lag')==1).select('Product_Category','Indicator','Lag','rec_lag'), 
     ['Product_Category', 'Indicator'], 
     'inner'
 )
@@ -704,25 +759,13 @@ num_selected_drivers = middle_drivers.count()
 print(f"number of selected driver records: {num_selected_drivers}")
 
 joined_middle = middle_drivers.join(
-    middle.select('Product_Category','Region','Indicator','Lag'), 
+    middle.filter(col('rec_lag')==1).select('Product_Category','Region','Indicator','Lag'), 
     ['Product_Category', 'Region','Indicator'], 
     'inner'
 )
 
-display(joined_middle.select('Product_Category','Indicator').distinct().orderBy('Product_Category',"Indicator"))
+display(joined_middle.select('Product_Category','Region','Indicator').distinct().orderBy('Product_Category','Region',"Indicator"))
 print(joined_middle.count())
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(joined_topline.groupBy('Product_Category').agg(countDistinct('Indicator')))
-display(joined_middle.groupBy('Product_Category','Region').agg(countDistinct('Indicator')))
 
 # METADATA ********************
 

@@ -248,6 +248,7 @@ country_region_map = {
     # EMEA
     # --------------------
     "Russia": "EMEA",
+    "Jersey": "EMEA",
     "Germany": "EMEA",
     "Sweden": "EMEA",
     "Iraq": "EMEA",

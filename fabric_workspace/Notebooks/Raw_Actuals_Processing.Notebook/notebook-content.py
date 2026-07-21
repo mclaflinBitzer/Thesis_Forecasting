@@ -428,7 +428,7 @@ def fill_data(df, group_cols, target_col):
     ## creates a dataframe with all combinations of Date & grouping columns and fills Null values within the target column w/ 0s
     filled_df = (full_grid\
                     .join(df, on=group_cols+["Date"], how="left")\
-                    #.fillna({target_col:0})
+                    .fillna({target_col:0})
                     )
 
     # extract the needed columns & return the ordered dataframe
@@ -527,22 +527,22 @@ print(expected)
 
 
 
-def check_gaps(pdf: pd.DataFrame) -> pd.DataFrame:
-    pdf      = pdf.sort_values("Date")
-    n_obs    = len(pdf)
-    expected = pd.date_range(pdf["Date"].min(),
-                             pdf["Date"].max(), freq="MS")
-    return pd.DataFrame([{
-        "series_id":  pdf["series_id"].iloc[0],
-        "n_obs":      n_obs,
-        "n_expected": len(expected),
-        "has_gaps":   n_obs != len(expected)
-    }])
+# def check_gaps(pdf: pd.DataFrame) -> pd.DataFrame:
+#     pdf      = pdf.sort_values("Date")
+#     n_obs    = len(pdf)
+#     expected = pd.date_range(pdf["Date"].min(),
+#                              pdf["Date"].max(), freq="MS")
+#     return pd.DataFrame([{
+#         "series_id":  pdf["series_id"].iloc[0],
+#         "n_obs":      n_obs,
+#         "n_expected": len(expected),
+#         "has_gaps":   n_obs != len(expected)
+#     }])
 
-gap_report = df_sales.groupBy("series_id") \
-    .applyInPandas(check_gaps, schema=gap_check_schema)
+# gap_report = df_sales.groupBy("series_id") \
+#     .applyInPandas(check_gaps, schema=gap_check_schema)
 
-gap_report.filter(F.col("has_gaps")).show()
+# gap_report.filter(F.col("has_gaps")).show()
 
 # METADATA ********************
 
@@ -554,18 +554,6 @@ gap_report.filter(F.col("has_gaps")).show()
 # MARKDOWN ********************
 
 # ## writing raw and filled topline/middle data to tables
-
-# CELL ********************
-
-## need to implement the fillna w/ 0 at some point TDB
-middle_test = middle_test.fillna({"Quantity":0})
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
 # CELL ********************
 
@@ -593,36 +581,6 @@ write_to_lakehouse(middle_df, "Sales_Forecasting.bronze.middle_raw")
 middle_filled_df = fill_data(middle_df, MIDDLE_GRP_COLS, MIDDLE_TARGET_COL)
 middle_filled_df = middle_filled_df.withColumn("series", concat_ws("___",*MIDDLE_GRP_COLS))
 write_to_lakehouse(middle_filled_df, MIDDLE_TABLE_NAME)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 
