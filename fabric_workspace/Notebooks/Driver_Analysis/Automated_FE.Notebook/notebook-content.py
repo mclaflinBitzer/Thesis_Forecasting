@@ -666,6 +666,30 @@ def dl_calc_corr(pdf):
 
 # CELL ********************
 
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# # PARAMETER SETTING
+
+# CELL ********************
+
 ## BASE DIRECTORY FOR ALL OUTPUTS
 excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 
@@ -708,13 +732,13 @@ M_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
 
 
 M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
-M_feature_diagnostics_file = excel_base_dir + "Middle/middle_feature_diagnostics.xlsx"
-M_selected_feature_file = excel_base_dir + "Middle/middle_selected_features.xlsx"
+M_feature_diagnostics_file = excel_base_dir + "Middle/middle_ENCV_feature_diagnostics.xlsx"
+M_selected_feature_file = excel_base_dir + "Middle/middle_ENCV_selected_features.xlsx"
 
 M_xgboost_diagnostics_file = excel_base_dir + "Middle/middle_xgboost_feature_diagnostics.xlsx"
 M_xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_selected_features.xlsx"
 
-M_dl_selected_feature_file = excel_base_dir + "middle_dl_selected_feature.xlsx"
+M_dl_selected_feature_file = excel_base_dir + "Middle/middle_dl_selected_feature.xlsx"
 
 
 
@@ -802,7 +826,6 @@ compiled_drivers = spark.read.table(driver_table).select("Country","Indicator","
 # ACTUALS TABLE
 data = (
     spark.read.table(actuals_table)
-    .filter(col('Product_Category')=='ALU')
     .withColumnRenamed(initial_target_col,target_col)
 )
 ## aggregating based on the ACT GRP COLS defined
@@ -1165,8 +1188,7 @@ if dl_run:
 
     ## CALCULATING CORRELATION PER COMBINATION
     corr_schema = StructType(
-        [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
-        [StructField(c, StringType(), False) for c in DRV_GRP_COLS] +
+        [StructField(c, StringType(), False) for c in join_cols] +
         [
             StructField("Correlation", DoubleType(), True),
             StructField("Lag", IntegerType(), True)
@@ -1175,7 +1197,7 @@ if dl_run:
 
     corr_df = (
         joined_data_features
-        .groupBy(*(ACT_GRP_COLS + DRV_GRP_COLS))
+        .groupBy(*(join_cols))
         .applyInPandas(dl_calc_corr, schema=corr_schema)
     )
 
@@ -1189,23 +1211,14 @@ if dl_run:
 
     final_features = corr_rank_df.filter(
         (col('rank')<=dl_init_features) &
-        (col('ABS_Correlation')>=.1)
+        (col('ABS_Correlation')>=.1) &
+        (col('rank')<=30)
         )
     
     display(final_features.orderBy(*ACT_GRP_COLS, asc('rank')))
 
     final_features_df = final_features.orderBy(*ACT_GRP_COLS, asc('rank')).toPandas()
     final_features_df.to_excel(dl_selected_feature_file, index=False)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 
@@ -1363,20 +1376,7 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
 
     test_r2 = model.score(X_test_s, y_test)
 
-    # ---- bootstrap stability selection on train fold ----
-    stability_counts = pd.Series(0, index=feature_cols, dtype=float)
-    for _ in range(N_BOOT):
-        boot_idx = X_train_s.sample(frac=BOOT_SAMPLE_FRAC, replace=True).index
-        try:
-            m = ElasticNetCV(
-                l1_ratio=[model.l1_ratio_], alphas=[model.alpha_],
-                cv=2, max_iter=5000,
-            ).fit(X_train_s.loc[boot_idx], y_train.loc[boot_idx])
-            stability_counts += (pd.Series(m.coef_, index=feature_cols) != 0).astype(int)
-        except Exception:
-            continue
-            
-    stability_score = stability_counts / N_BOOT
+
 
     coefs = pd.Series(model.coef_, index=feature_cols)
     abs_coef = coefs.abs()
@@ -1517,11 +1517,9 @@ import builtins
 # ============================================================
 MIN_HISTORY = 24
 TEST_FRAC = 0.2
-N_BOOT = 10                    # bootstrap resamples for stability selection
-BOOT_SAMPLE_FRAC = 0.8
-STABILITY_THRESHOLD = 0.6
 MAX_FEATURES_OUT = 25
-PERM_REPEATS = 10              # repeats for permutation importance
+
+
 
 # structural controls — absorb trend/seasonality so driver importances aren't
 # penalized for failing to explain target movement they were never suited to explain
@@ -1529,13 +1527,8 @@ CONTROL_COLS = ["time_trend", "y_lag1", "y_lag12"]
 
 # XGBoost hyperparameter grid — small, deliberately conservative given short series
 XGB_PARAM_GRID = [
-    {"max_depth": 3, "learning_rate": 0.05, "n_estimators": 150,"subsample": 0.8, "colsample_bytree": 0.6}
-
-    ## LIMITED TEH PARAM GRID TO LIMIT RUN TIME DUE TO THIS ONLY BEING FOR FEATURE SELECTION
-    # {"max_depth": 2, "learning_rate": 0.05, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
-    # {"max_depth": 3, "learning_rate": 0.05, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
-    # {"max_depth": 3, "learning_rate": 0.1,  "n_estimators": 100, "subsample": 0.7, "colsample_bytree": 0.7},
-    # {"max_depth": 4, "learning_rate": 0.05, "n_estimators": 150, "subsample": 0.8, "colsample_bytree": 0.6},
+    {"max_depth": 3, "learning_rate": 0.05, "n_estimators": 50,"subsample": 0.8,
+     "colsample_bytree": 0.6, "objective":"reg:squarederror", "random_state":42, "n_jobs":1}
 ]
 
 
@@ -1546,11 +1539,8 @@ xgb_diagnostics_schema = StructType(
     [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
     [
         StructField("Feature", StringType(), False),
-        StructField("importance_gain", DoubleType(), True),      # split-quality based
-        StructField("importance_perm", DoubleType(), True),      # permutation based (primary)
-        StructField("importance_perm_std", DoubleType(), True),
-        StructField("importance_pct", DoubleType(), True),
-        StructField("stability_score", DoubleType(), True),
+        StructField("gain_importance", DoubleType(), True),
+        StructField("gain_importance_pct", DoubleType(), True),
         StructField("selected", IntegerType(), True),
         StructField("is_control", IntegerType(), False),
         StructField("best_max_depth", IntegerType(), True),
@@ -1593,13 +1583,13 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
         cols = feature_cols if cols is None else cols
         return pd.DataFrame([{
             **id_vals, "Feature": f,
-            "importance_gain": None, "importance_perm": None, "importance_perm_std": None,
-            "importance_pct": None, "stability_score": None, "selected": 0,
+            "gain_importance": None, "gain_importance_pct": None, "selected": 0,
             "is_control": int(f in CONTROL_COLS),
             "best_max_depth": None, "best_learning_rate": None, "best_n_estimators": None,
             "test_r2": None, "controls_only_r2": None, "naive_r2": None,
             "drivers_add_value": None, "n_obs": n_obs,
         } for f in cols])
+
 
     if len(wide) < MIN_HISTORY or len(driver_cols) == 0:
         return empty_result(feature_cols, len(wide))
@@ -1627,37 +1617,12 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
     X_train = X_train.fillna(medians)
     X_test = X_test.fillna(medians)
 
-    # ---- hyperparameter search via TimeSeriesSplit CV ----
-    n_splits = builtins.min(5, builtins.max(2, len(y_train) // 12))
-    tscv = TimeSeriesSplit(n_splits=n_splits)
 
-    best_score, best_params = -np.inf, None
-    for params in XGB_PARAM_GRID:
-        fold_scores = []
-        for tr_idx, val_idx in tscv.split(X_train):
-            X_tr, X_val = X_train.iloc[tr_idx], X_train.iloc[val_idx]
-            y_tr, y_val = y_train.iloc[tr_idx], y_train.iloc[val_idx]
-            try:
-                m = xgb.XGBRegressor(
-                    objective="reg:squarederror", random_state=42,
-                    n_jobs=1,  # avoid nested parallelism fighting Spark's own executor threads
-                    **params
-                ).fit(X_tr, y_tr)
-                fold_scores.append(m.score(X_val, y_val))
-            except Exception:
-                fold_scores.append(-np.inf)
-        mean_score = np.mean(fold_scores)
-        if mean_score > best_score:
-            best_score, best_params = mean_score, params
-
-    if best_params is None:
-        return empty_result(feature_cols, len(wide))
+    best_params = XGB_PARAM_GRID[0]
 
     # ---- fit final model on full training set with best params ----
     try:
-        model = xgb.XGBRegressor(
-            objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-        ).fit(X_train, y_train)
+        model = xgb.XGBRegressor(**best_params).fit(X_train, y_train)
     except Exception:
         return empty_result(feature_cols, len(wide))
 
@@ -1665,57 +1630,34 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
     naive_r2 = r2_score(y_test, np.full_like(y_test, y_train.mean(), dtype=float))
 
     # ---- controls-only baseline: isolates drivers' marginal contribution ----
-    ctrl_model = xgb.XGBRegressor(
-        objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-    ).fit(X_train[CONTROL_COLS], y_train)
+    ctrl_model = xgb.XGBRegressor(**best_params).fit(X_train[CONTROL_COLS], y_train)
     controls_only_r2 = ctrl_model.score(X_test[CONTROL_COLS], y_test)
     drivers_add_value = int(test_r2 > controls_only_r2)
 
     # ---- gain-based importance (fast, built-in, but biased toward high-cardinality splits) ----
-    gain_importance = pd.Series(model.feature_importances_, index=feature_cols)
-
-    # ---- permutation importance on TEST set (primary metric — unbiased, model-agnostic) ----
-    perm = permutation_importance(
-        model, X_test, y_test, n_repeats=PERM_REPEATS, random_state=42, n_jobs=1
+    gain_importance = pd.Series(
+        model.feature_importances_,
+        index=feature_cols
     )
-    perm_importance = pd.Series(perm.importances_mean, index=feature_cols).clip(lower=0)
-    perm_importance_std = pd.Series(perm.importances_std, index=feature_cols)
 
-    total_perm = perm_importance.sum()
-    importance_pct = (perm_importance / total_perm * 100) if total_perm > 0 else perm_importance * 0
+    total_gain = gain_importance.sum()
 
-    # ---- bootstrap stability selection ----
-    stability_counts = pd.Series(0, index=feature_cols, dtype=float)
-    for _ in range(N_BOOT):
-        boot_idx = X_train.sample(frac=BOOT_SAMPLE_FRAC, replace=True).index
-        try:
-            m = xgb.XGBRegressor(
-                objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-            ).fit(X_train.loc[boot_idx], y_train.loc[boot_idx])
-            boot_perm = permutation_importance(
-                m, X_test, y_test, n_repeats=10, random_state=42, n_jobs=1
-            )
-            # a feature "counts" this round if its permutation importance is meaningfully > 0
-            stability_counts += (pd.Series(boot_perm.importances_mean, index=feature_cols) > 1e-6).astype(int)
-        except Exception:
-            continue
-    stability_score = stability_counts / N_BOOT
+    gain_importance_pct = (
+        gain_importance / total_gain * 100
+        if total_gain > 0
+        else gain_importance * 0
+    )
 
     selected = (
-        (stability_score >= STABILITY_THRESHOLD) &
-        (perm_importance > 0) &
-        (~pd.Series(feature_cols, index=feature_cols).isin(CONTROL_COLS))  # controls never "selected"
-        #&   drivers_add_value  # series-level gate: only trust selection if drivers beat controls-only
+        (gain_importance > 0) &
+        (~pd.Series(feature_cols, index=feature_cols).isin(CONTROL_COLS))
     )
 
     out = pd.DataFrame({
         **{c: id_vals[c] for c in ACT_GRP_COLS},
         "Feature": feature_cols,
-        "importance_gain": gain_importance.values,
-        "importance_perm": perm_importance.values,
-        "importance_perm_std": perm_importance_std.values,
-        "importance_pct": importance_pct.values,
-        "stability_score": stability_score.values,
+        "gain_importance": gain_importance.values,
+        "gain_importance_pct": gain_importance_pct.values,
         "selected": selected.astype(int).values,
         "is_control": [int(f in CONTROL_COLS) for f in feature_cols],
         "best_max_depth": best_params["max_depth"],
@@ -1725,11 +1667,11 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
         "controls_only_r2": controls_only_r2,
         "naive_r2": naive_r2,
         "drivers_add_value": int(drivers_add_value),
-        "n_obs": len(wide),
+        "n_obs": len(y),
     })
 
     # cap selected drivers at MAX_FEATURES_OUT, ranked by importance_pct
-    out = out.sort_values(["selected", "importance_pct"], ascending=[False, False])
+    out = out.sort_values(["selected", "gain_importance_pct"], ascending=[False, False])
     keep_mask = out["selected"] == 1
     if keep_mask.sum() > MAX_FEATURES_OUT:
         drop_idx = out[keep_mask].index[MAX_FEATURES_OUT:]
@@ -1737,192 +1679,6 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# results_xgb = results_w_col.filter(col('feature_rank')<=xgboost_init_features).drop('feature_rank')
-
-# pdf = results_xgb.toPandas()
-
-
-# pdf = pdf.sort_values("Date").reset_index(drop=True)
-# id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
-
-# # ---- pivot long -> wide, one row per Date ----
-# wide = (
-#     pdf.pivot_table(index=["Date", target_col], columns="feature_col",
-#                         values="Feature_value", aggfunc="first")
-#     .reset_index()
-# )
-
-# driver_cols = [c for c in wide.columns if c not in ["Date", target_col]]
-
-# # ---- structural controls ----
-# wide["time_trend"] = np.arange(len(wide))
-# wide["y_lag1"] = wide[target_col].shift(1)
-# wide["y_lag12"] = wide[target_col].shift(12)
-# wide = wide.dropna(subset=["y_lag12"]).reset_index(drop=True)
-
-
-# feature_cols = driver_cols + CONTROL_COLS
-
-# def empty_result(cols=None, n_obs=0):
-#     cols = feature_cols if cols is None else cols
-#     return pd.DataFrame([{
-#         **id_vals, "Feature": f,
-#         "importance_gain": None, "importance_perm": None, "importance_perm_std": None,
-#         "importance_pct": None, "stability_score": None, "selected": 0,
-#         "is_control": int(f in CONTROL_COLS),
-#         "best_max_depth": None, "best_learning_rate": None, "best_n_estimators": None,
-#         "test_r2": None, "controls_only_r2": None, "naive_r2": None,
-#         "drivers_add_value": None, "n_obs": n_obs,
-#     } for f in cols])
-
-# if len(wide) < MIN_HISTORY or len(driver_cols) == 0:
-#     print("PROBLEM HERE CHECK 1")
-
-# X = wide[feature_cols].apply(pd.to_numeric, errors="coerce")
-# y = pd.to_numeric(wide[target_col], errors="coerce")
-
-# valid = y.notna()
-# X, y = X.loc[valid].reset_index(drop=True), y.loc[valid].reset_index(drop=True)
-
-# if len(y) < MIN_HISTORY:
-#     print("PROBLEM HERE CHECK 2")
-
-# # ---- time-respecting split ----
-# split_idx = int(len(y) * (1 - TEST_FRAC))
-# X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-# y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-
-# if len(y_train) < 12 or len(y_test) < 3:
-#     print("PROBLEM HERE CHECK 3")
-
-# # ---- median impute from TRAIN only (no leakage) ----
-# medians = X_train.median()
-# #medians = medians.fillna(0)
-# X_train = X_train.fillna(medians)
-# X_test = X_test.fillna(medians)
-
-# # ---- hyperparameter search via TimeSeriesSplit CV ----
-# n_splits = builtins.min(5, builtins.max(2, len(y_train) // 12))
-# tscv = TimeSeriesSplit(n_splits=n_splits)
-
-# best_score, best_params = -np.inf, None
-# for params in XGB_PARAM_GRID:
-#     fold_scores = []
-#     for tr_idx, val_idx in tscv.split(X_train):
-#         X_tr, X_val = X_train.iloc[tr_idx], X_train.iloc[val_idx]
-#         y_tr, y_val = y_train.iloc[tr_idx], y_train.iloc[val_idx]
-#         try:
-#             m = xgb.XGBRegressor(
-#                 objective="reg:squarederror", random_state=42,
-#                 n_jobs=1,  # avoid nested parallelism fighting Spark's own executor threads
-#                 **params
-#             ).fit(X_tr, y_tr)
-#             fold_scores.append(m.score(X_val, y_val))
-#         except Exception:
-#             print("PROBLEM HERE CHECK 4")
-#             fold_scores.append(-np.inf)
-#     mean_score = np.mean(fold_scores)
-#     if mean_score > best_score:
-#         best_score, best_params = mean_score, params
-
-# if best_params is None:
-#     print("PROBLEM HERE CHECK 5")
-
-# # ---- fit final model on full training set with best params ----
-# try:
-#     model = xgb.XGBRegressor(
-#         objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-#     ).fit(X_train, y_train)
-# except Exception:
-#     print("PROBLEM HERE CHECK 6")
-
-# test_r2 = model.score(X_test, y_test)
-# naive_r2 = r2_score(y_test, np.full_like(y_test, y_train.mean(), dtype=float))
-
-# # ---- controls-only baseline: isolates drivers' marginal contribution ----
-# ctrl_model = xgb.XGBRegressor(
-#     objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-# ).fit(X_train[CONTROL_COLS], y_train)
-# controls_only_r2 = ctrl_model.score(X_test[CONTROL_COLS], y_test)
-# drivers_add_value = int(test_r2 > controls_only_r2)
-
-# # ---- gain-based importance (fast, built-in, but biased toward high-cardinality splits) ----
-# gain_importance = pd.Series(model.feature_importances_, index=feature_cols)
-
-# # ---- permutation importance on TEST set (primary metric — unbiased, model-agnostic) ----
-# perm = permutation_importance(
-#     model, X_test, y_test, n_repeats=PERM_REPEATS, random_state=42, n_jobs=1
-# )
-# perm_importance = pd.Series(perm.importances_mean, index=feature_cols).clip(lower=0)
-# perm_importance_std = pd.Series(perm.importances_std, index=feature_cols)
-
-# total_perm = perm_importance.sum()
-# importance_pct = (perm_importance / total_perm * 100) if total_perm > 0 else perm_importance * 0
-
-# # ---- bootstrap stability selection ----
-# stability_counts = pd.Series(0, index=feature_cols, dtype=float)
-# for _ in range(N_BOOT):
-#     boot_idx = X_train.sample(frac=BOOT_SAMPLE_FRAC, replace=True).index
-#     try:
-#         m = xgb.XGBRegressor(
-#             objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-#         ).fit(X_train.loc[boot_idx], y_train.loc[boot_idx])
-#         boot_perm = permutation_importance(
-#             m, X_test, y_test, n_repeats=10, random_state=42, n_jobs=1
-#         )
-#         # a feature "counts" this round if its permutation importance is meaningfully > 0
-#         stability_counts += (pd.Series(boot_perm.importances_mean, index=feature_cols) > 1e-6).astype(int)
-#     except Exception:
-#         print("PROBLEM HERE CHECK 7")
-#         continue
-# stability_score = stability_counts / N_BOOT
-
-# selected = (
-#     (stability_score >= STABILITY_THRESHOLD) &
-#     (perm_importance > 0) &
-#     (~pd.Series(feature_cols, index=feature_cols).isin(CONTROL_COLS))  # controls never "selected"
-#     #&   drivers_add_value  # series-level gate: only trust selection if drivers beat controls-only
-# )
-
-# out = pd.DataFrame({
-#     **{c: id_vals[c] for c in ACT_GRP_COLS},
-#     "Feature": feature_cols,
-#     "importance_gain": gain_importance.values,
-#     "importance_perm": perm_importance.values,
-#     "importance_perm_std": perm_importance_std.values,
-#     "importance_pct": importance_pct.values,
-#     "stability_score": stability_score.values,
-#     "selected": selected.astype(int).values,
-#     "is_control": [int(f in CONTROL_COLS) for f in feature_cols],
-#     "best_max_depth": best_params["max_depth"],
-#     "best_learning_rate": best_params["learning_rate"],
-#     "best_n_estimators": best_params["n_estimators"],
-#     "test_r2": test_r2,
-#     "controls_only_r2": controls_only_r2,
-#     "naive_r2": naive_r2,
-#     "drivers_add_value": int(drivers_add_value),
-#     "n_obs": len(wide),
-# })
-
-# # cap selected drivers at MAX_FEATURES_OUT, ranked by importance_pct
-# out = out.sort_values(["selected", "importance_pct"], ascending=[False, False])
-# keep_mask = out["selected"] == 1
-# if keep_mask.sum() > MAX_FEATURES_OUT:
-#     drop_idx = out[keep_mask].index[MAX_FEATURES_OUT:]
-#     out.loc[drop_idx, "selected"] = 0
-
-# display(out)
 
 
 # METADATA ********************
@@ -1950,9 +1706,9 @@ if xgboost_run:
     )
 
     xgb_feature_diagnostics.cache()
-    display(xgb_feature_diagnostics.orderBy(*ACT_GRP_COLS, desc("importance_pct")))
+    display(xgb_feature_diagnostics.orderBy(*ACT_GRP_COLS, desc("gain_importance_pct")))
 
-    xgb_selected_features = xgb_feature_diagnostics.filter(col('selected')==1).orderBy(*ACT_GRP_COLS,desc('importance_pct'))
+    xgb_selected_features = xgb_feature_diagnostics.filter(col('selected')==1).orderBy(*ACT_GRP_COLS,desc('gain_importance_pct'))
 
     xgb_feature_diagnostics_pdf = xgb_feature_diagnostics.toPandas()
 
@@ -1972,7 +1728,6 @@ if xgboost_run:
 
 # CELL ********************
 
-display(xgb_feature_diagnostics)
 display(xgb_selected_features)
 
 # METADATA ********************

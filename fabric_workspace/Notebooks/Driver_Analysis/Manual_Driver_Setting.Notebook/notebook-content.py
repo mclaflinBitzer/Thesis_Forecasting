@@ -41,14 +41,6 @@ middle_df = pd.read_excel('/lakehouse/default/Files/Driver_Analysis/middle_recom
 topline = spark.createDataFrame(topline_df)
 middle = spark.createDataFrame(middle_df)
 
-display(
-    middle
-    .filter(
-        (col('Product_Category')=='ALU') &
-        (col('Region')=='APAC') &
-        (col('Indicator')=='Real_GDP_total_2015_prices')
-    )
-)
 
 # METADATA ********************
 
@@ -61,14 +53,6 @@ display(
 
 all_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers")
 
-display(
-    all_drivers
-    .filter(
-        #(col('Product_Category')=='ALU') &
-        (col('Region')=='APAC') &
-        (col('Indicator').like('%Real_GDP_total%'))
-    )
-)
 
 # METADATA ********************
 
@@ -735,7 +719,7 @@ num_selected_drivers = topline_drivers.count()
 print(f"number of selected driver records: {num_selected_drivers}")
 
 joined_topline = topline_drivers.join(
-    topline.filter(col('rec_lag')==1).select('Product_Category','Indicator','Lag','rec_lag'), 
+    topline.filter(col('rec_lag')==1).select('Product_Category','Indicator','Lag','rec_lag','max_corr'), 
     ['Product_Category', 'Indicator'], 
     'inner'
 )
@@ -759,7 +743,7 @@ num_selected_drivers = middle_drivers.count()
 print(f"number of selected driver records: {num_selected_drivers}")
 
 joined_middle = middle_drivers.join(
-    middle.filter(col('rec_lag')==1).select('Product_Category','Region','Indicator','Lag'), 
+    middle.filter(col('rec_lag')==1).select('Product_Category','Region','Indicator','Lag','max_corr'), 
     ['Product_Category', 'Region','Indicator'], 
     'inner'
 )

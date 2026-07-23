@@ -30,6 +30,35 @@ from pyspark.sql.functions import *
 from pyspark.sql.types import *
 import operator
 from functools import reduce
+import builtins
+from sklearn.preprocessing import StandardScaler
+from pyspark.sql.window import Window
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+# temp = spark.read.table('Sales_Forecasting.silver.topline_cutoff_data')
+
+
+# test = spark.read.parquet(Prophet_dir).cache()
+
+# test_agg = test.groupBy(*ACT_GRP_COLS, 'Date').agg(avg('Forecast').alias('Forecast'))
+
+
+# test_join = (
+#     temp.withColumnRenamed('Quantity','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('ACT')))
+#     .unionByName(
+#         test_agg.withColumnRenamed('Forecast','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('FORCAST')))
+#     )
+# )
+
+# display(test_join)
 
 # METADATA ********************
 
@@ -50,9 +79,9 @@ Topline = True
 rerun_historical_forecasts = True
 ets_run = False
 arimax_run = True
-sarimax_run = False
+sarimax_run = True
 prophet_run = True
-driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 
 
 
@@ -122,43 +151,6 @@ if driver_status == "No_Drivers":
 else:
     drivers_used = True
     ets_run = False         # this cannot run with drivers
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# test = spark.read.parquet(Prophet_dir)
-# display(test.groupBy(*ACT_GRP_COLS,'Date').agg(avg("Forecast").alias("Forecast")))
-# display(test.groupBy(*ACT_GRP_COLS).agg(max("Training_End_Date")))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# actuals.columns
-
-# display(
-#     actuals
-#     .groupBy(*ACT_GRP_COLS,'Date')
-#     .agg(avg('Value').alias('Value'))
-#     .withColumn("series", concat(col("series"),lit("_ACTUALS")))
-#     .unionByName(
-#         test
-#         .groupBy(*ACT_GRP_COLS, 'Date')
-#         .agg(avg('Forecast').alias('Value'))
-#         .withColumn("series", concat(col('series'), lit("_FORECAST")))
-#     )
-# )
 
 # METADATA ********************
 
@@ -260,7 +252,6 @@ if drivers_used:
     else:
         print('world agg already done')
 
-
     # READING FILES W/ SELECTED DRIVERS
     ## Read file handling based on excel or csv files 
     if 'csv' in selected_driver_dir:
@@ -276,13 +267,39 @@ if drivers_used:
             pd.read_excel(selected_driver_dir)
             .drop(columns="Unnamed: 0", errors="ignore")
         )
+        selected_drivers = (
+            selected_drivers
+            .withColumn('Indicator', split(col('Feature'),"__").getItem(0))
+            .withColumn("Lag", split(col("Feature"),"__").getItem(1))
+            .withColumnRenamed("Importance_pct",'max_corr')
+        )
     else:
         raise ValueError(f"Unsupported file type. expected csv or xlsx but received: {selected_driver_dir}")
 
 
-    print(f"selected_driver num distinct records: {selected_drivers.select('Product_Category','Indicator').distinct().count()}")
-    print(f"agg_drivers records: {aggregated_drivers.select('Indicator').distinct().count()}")
 
+
+
+
+
+
+
+    ## CODE IF NEEDED TO FILTER DOWN THE NUMBER OF DRIVERS FOR THE CLASSICAL MODELS
+
+    # temp_cols = ACT_GRP_COLS.copy()
+    # temp_cols.remove('series')
+    # w_temp = Window.partitionBy(temp_cols).orderBy(desc('max_corr'))
+    # selected_drivers = selected_drivers.withColumn('rn',row_number().over(w_temp))
+    # selected_drivers = selected_drivers.filter(col('rn')<=5)
+
+
+    check_cols = list(dict.fromkeys(ACT_GRP_COLS+DRV_GRP_COLS))
+    check_cols.remove('series')
+    print(f"selected_driver num distinct records: {selected_drivers.select(*check_cols).distinct().count()}")
+    print(f"agg_drivers records: {aggregated_drivers.select(*DRV_GRP_COLS).distinct().count()}")
+
+
+    # JOINING DATAFRAMES
     joined_driver_data = (
         broadcast(selected_drivers)
         .join(
@@ -293,11 +310,9 @@ if drivers_used:
     )
 
 
-    # JOINING DATAFRAMES
-
-    print(f"joined records: {joined_driver_data.select('Product_Category','Indicator').distinct().count()}")
-
-    if (selected_drivers.select('Product_Category','Indicator').distinct().count()) != (joined_driver_data.select('Product_Category','Indicator').distinct().count()):
+    print(f"joined records: {joined_driver_data.select(*check_cols).distinct().count()}")
+    
+    if (selected_drivers.select(*check_cols).distinct().count()) != (joined_driver_data.select(*check_cols).distinct().count()):
         raise ValueError("There is a mismatch and the number of combinations has changed post selected driver & aggregated driver join")
 
     ## creating a driver_date column for the join with actuals to enforce the LAG selected per driver
@@ -314,6 +329,7 @@ if drivers_used:
     ## join conditions based on ACT GRP COLS w/o 'series'
     join_cols = ACT_GRP_COLS.copy()
     join_cols.remove('series')
+    print(join_cols)
 
     conditions = []
     for col_name in join_cols:
@@ -329,6 +345,7 @@ if drivers_used:
     ## creating the actual conditions
     join_cond = reduce(operator.and_, conditions)
 
+
     ## joining the actuals data with the selected drivers with their data already lagged
     actuals_w_drivers = (
         actuals_fh_populated.alias("a")
@@ -339,16 +356,19 @@ if drivers_used:
         ).select("a.*", *[col(f"d.{c}") for c in DRV_GRP_COLS if c not in ACT_GRP_COLS], "d.driver_value", "d.Lag")
     )
 
+
+    # ensures that overlapping columns like "Region" on the middle level aren't dropped 
+    drop_cols = [c for c in DRV_GRP_COLS if c not in ACT_GRP_COLS]
+
+
     actuals_w_drivers = (
         actuals_w_drivers
         .withColumn('feature_col', concat_ws("__", *DRV_GRP_COLS, col("Lag").cast("String")))
-        .drop(*DRV_GRP_COLS, "Lag")
+        .drop(*drop_cols, "Lag")
     )
 
     actuals_fh_populated = actuals_w_drivers
     print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
-
-
 
 
 # METADATA ********************
@@ -402,11 +422,41 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
             if pd.isna(med):
                 med=0
             prophet_train[c] = prophet_train[c].fillna(med)
-            fut_med = prophet_future[c].median()
-            if pd.isna(fut_med):
-                fut_med=0
-            prophet_future[c] = prophet_future[c].fillna(fut_med)
+            prophet_future[c] = prophet_future[c].fillna(med)
+
+
+            # standardizing driver values using TRAIN statistics
+            mean = prophet_train[c].mean()
+            std = prophet_train[c].std()
+
+            if pd.isna(std) or std == 0:
+                std = 1
+
+            prophet_train[c] = (prophet_train[c] - mean) / std
+            prophet_future[c] = (prophet_future[c] - mean) / std
+
     # ============================================================
+
+    # ============================================================
+    # Logistic growth requires floor/cap columns
+    # ============================================================
+
+    floor = 0
+
+    recent_max = prophet_train["y"].tail(12).max()
+    historical_max = prophet_train["y"].max()
+
+    cap = builtins.max(
+        historical_max * 1.3,
+        recent_max * 1.3,
+        1.0
+    )
+
+    prophet_train["floor"] = floor
+    prophet_train["cap"] = cap
+
+    prophet_future["floor"] = floor
+    prophet_future["cap"] = cap
 
     # ---- simple train/validation split for hyperparameter comparison ----
     val_size = 6
@@ -417,30 +467,35 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
     val_part = prophet_train.iloc[-val_size:]
 
     param_grid = [
-        {"changepoint_prior_scale": cps, "seasonality_prior_scale": sps}
-        for cps in [0.01, 0.05, 0.1, 0.5]
-        for sps in [0.1, 1.0, 10.0]
+        {"changepoint_prior_scale": cps,
+         "seasonality_prior_scale": sps,
+         "regressor_prior_scale": rps}
+        for cps in [0.01, 0.03, 0.05, 0.1, 0.2]      ## original [0.01, 0.05, 0.1, 0.2]
+        for sps in [0.01, 0.1, 1.0, 0.2]        ## original [0.01, 0.1, 1.0, 5.0]
+        for rps in [.006, .008, .01, .015]
     ]
 
     # ============================================================
     # column lists only include driver_cols when drivers_used is True, so no-driver runs don't reference
     # columns that don't exist.
     # ============================================================
-    fit_cols = ["ds", "y"] + (driver_cols if drivers_used else [])
-    predict_cols = ["ds"] + (driver_cols if drivers_used else [])
+    fit_cols = ["ds", "y", "cap", "floor"] + (driver_cols if drivers_used else [])
+    predict_cols = ["ds", "cap", "floor"] + (driver_cols if drivers_used else [])
     # ============================================================
 
     best_mae, best_params = np.inf, None
     for params in param_grid:
         try:
             m = Prophet(
+                growth = 'linear',
                 changepoint_prior_scale=params["changepoint_prior_scale"],
                 seasonality_prior_scale=params["seasonality_prior_scale"],
+                seasonality_mode = 'additive', # default is additive which can produce forecasts that exceed the cap or go negative
                 yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False,
             )
             if drivers_used:  # only add regressors when drivers exist
                 for c in driver_cols:
-                    m.add_regressor(c)
+                    m.add_regressor(c, prior_scale=params['regressor_prior_scale'])      #.008 has given the best so far
             m.fit(train_part[fit_cols])
 
             val_pred = m.predict(val_part[predict_cols])
@@ -455,16 +510,26 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
 
     # ---- refit on full train data with best params ----
     final_model = Prophet(
+        growth = 'linear',
         changepoint_prior_scale=best_params["changepoint_prior_scale"],
         seasonality_prior_scale=best_params["seasonality_prior_scale"],
+        seasonality_mode='additive',        ## leave as additive (multiplicative doesn't forecast well)
         yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False,
     )
     if drivers_used:  
         for c in driver_cols:
-            final_model.add_regressor(c)
+            final_model.add_regressor(
+                c, 
+                prior_scale=best_params['regressor_prior_scale'])  # has a default of 10 but this lead to highly erratic outputs, tried .05 but that flattened the output too much
+                                ## w was too erratic as well, lead to 0 values
     final_model.fit(prophet_train[fit_cols])
 
     forecast = final_model.predict(prophet_future[predict_cols])
+
+    # enforcing clipping of forecasted values 
+    forecast["yhat"] = forecast["yhat"].clip(lower=floor, upper=cap)
+    forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=floor, upper=cap)
+    forecast["yhat_upper"] = forecast["yhat_upper"].clip(lower=floor, upper=cap)
 
     out = pd.DataFrame({
         **{c: id_vals[c] for c in ACT_GRP_COLS},
@@ -478,6 +543,7 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         "Forecast_Upper": forecast["yhat_upper"].values,
         "best_changepoint_prior_scale": best_params["changepoint_prior_scale"],
         "best_seasonality_prior_scale": best_params["seasonality_prior_scale"],
+        "best_regressor_prior_scale": best_params['regressor_prior_scale'],
         "cv_mae": best_mae,
     })
     return out
@@ -501,15 +567,22 @@ def fit_prophet(pdf: pd.DataFrame) -> pd.DataFrame:
     pdf = pdf.sort_values("Date").reset_index(drop=True)
 
     # convert long driver data to wide
+    ## needed to remove the target column and add back through merge as the future NaN records were being dropped w/ the pivot_table function
     if 'feature_col' in pdf.columns:
         pdf = (
-                pdf.pivot_table(
-                    index=ACT_GRP_COLS+['Date',target_col],
-                    columns='feature_col',
-                    values='driver_value',
-                    aggfunc='first'
-                ).reset_index()
+            pdf.pivot_table(
+                index=ACT_GRP_COLS + ['Date'],
+                columns='feature_col',
+                values='driver_value',
+                aggfunc='first'
             )
+            .reset_index()
+            .merge(
+                pdf[ACT_GRP_COLS + ['Date', target_col]].drop_duplicates(),
+                on=ACT_GRP_COLS + ['Date'],
+                how='left'
+            )
+        )
 
     id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
 
@@ -539,6 +612,7 @@ def fit_prophet(pdf: pd.DataFrame) -> pd.DataFrame:
             if out is None:
                 continue
             all_outputs.append(out)
+
     # ============================================================
     # future forecast now ALWAYS runs, independent of rerun_historical_forecasts
     # ============================================================
@@ -579,6 +653,7 @@ if prophet_run:
             StructField("Forecast_Upper", DoubleType(), True),
             StructField("best_changepoint_prior_scale", DoubleType(), True),
             StructField("best_seasonality_prior_scale", DoubleType(), True),
+            StructField("best_regressor_prior_scale", DoubleType(), True),
             StructField("cv_mae", DoubleType(), True),
         ]
     )
@@ -618,20 +693,43 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         return None
     
     ## Prepare target
-    y = pd.to_numeric(train[target_col], errors="coerce")
+    y = np.log1p(
+        pd.to_numeric(train[target_col], errors="coerce")
+    )
 
     ## Prepare drivers
     exog_train = None
     exog_future = None
+
     if drivers_used:
-        exog_train = train[driver_cols].apply(pd.to_numeric, errors='coerce')
-        exog_future = future[driver_cols].apply(pd.to_numeric, errors='coerce')
+        exog_train = train[driver_cols].apply(
+            pd.to_numeric,
+            errors="coerce"
+        )
+
+        exog_future = future[driver_cols].apply(
+            pd.to_numeric,
+            errors="coerce"
+        )
 
         medians = exog_train.median()
         exog_train = exog_train.fillna(medians)
-        future_medians = exog_future.median()
-        exog_future = exog_future.fillna(future_medians)
+        exog_future = exog_future.fillna(medians)
 
+
+        scaler = StandardScaler()
+
+        exog_train = pd.DataFrame(
+            scaler.fit_transform(exog_train),
+            columns=driver_cols,
+            index=train.index
+        )
+
+        exog_future = pd.DataFrame(
+            scaler.transform(exog_future),
+            columns=driver_cols,
+            index=future.index
+        )
     # Determining differencing order
     d = 0
     series_to_test = y.copy()
@@ -644,7 +742,8 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
             break
         series_to_test = series_to_test.diff()
         d +=1
-    
+    d = builtins.min(d,1)
+
     # limits the differencing 
     if d>=1:
         D_options = [0]
@@ -652,12 +751,12 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         D_options = [0,1]
 
     # historical scale to limit unrealistic outputs
-    hist_max_abs = float(y.abs().max())
+    hist_max_abs = float(train[target_col].max())
 
 
     ## SARIMAX Grid (seasonal fits are more computationally expensive than linear ARIMAX)
     best_aic, best_order, best_model = np.inf, None, None
-    for p, q in product(range(4), range(3)):
+    for p, q in product(range(3), range(3)):
         for P, Q, D in product(range(2), range(2), D_options):
 
             try:
@@ -667,29 +766,36 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
                     enforce_stationarity=True, enforce_invertibility=True
                 ).fit(disp=False)
 
-                if not m.mle_retvals.get('converged', False):
-                    continue
+                # if not m.mle_retvals.get('converged', False):
+                #     continue
 
                 ## check stability on AR/MA roots since converged isn't always reliable
                 ## Roots too close to the unit circle indicate a near unit root / unstable model
 
-                try:
-                    ar_roots = m.polynomial_ar.roots() if hasattr(m.polynomial_ar, "roots") else np.roots(m.polynomial_ar)
-                    if len(ar_roots) > 0 and np.any(np.abs(ar_roots) < 1.001):
-                        continue
-                except Exception:
-                    pass
+                # try:
+                #     ar_roots = m.polynomial_ar.roots() if hasattr(m.polynomial_ar, "roots") else np.roots(m.polynomial_ar)
+                #     if len(ar_roots) > 0 and np.any(np.abs(ar_roots) < 1.001):
+                #         continue
+                # except Exception:
+                #     pass
+
 
                 if m.aic < best_aic:
                     ## sanity guard: reject any cadidate whose forecast magnitude is wqidly outside historical range
                     try:
-                        trail_forecast = m.get_forecast(
+                        trial_forecast = m.get_forecast(
                             steps=FORECAST_HORIZON, exog=exog_future
                         ).predicted_mean
+                        trial_forecast = np.expm1(trial_forecast)
+
                     except Exception:
                         continue
                     
-                    if hist_max_abs > 0 and trail_forecast.abs().max() > 3 * hist_max_abs:
+                    # reject impossible forecasts
+                    if trial_forecast.min() < 0:
+                        continue
+
+                    if trial_forecast.max() > 3 * hist_max_abs:
                         continue
 
                     best_aic = m.aic
@@ -701,8 +807,8 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         return pd.DataFrame([])
 
     forecast_result = best_model.get_forecast(steps=FORECAST_HORIZON, exog=exog_future)
-    forecast_mean = forecast_result.predicted_mean
-    conf_int = forecast_result.conf_int(alpha=0.05)
+    forecast_mean = np.expm1(forecast_result.predicted_mean)
+    conf_int = np.expm1(forecast_result.conf_int(alpha=0.05))
 
     out = pd.DataFrame({
         **{c: id_vals[c] for c in ACT_GRP_COLS},
@@ -738,13 +844,19 @@ def fit_sarimax(pdf):
     # convert long driver data to wide
     if 'feature_col' in pdf.columns:
         pdf = (
-                pdf.pivot_table(
-                    index=ACT_GRP_COLS+['Date',target_col],
-                    columns='feature_col',
-                    values='driver_value',
-                    aggfunc='first'
-                ).reset_index()
+            pdf.pivot_table(
+                index=ACT_GRP_COLS + ['Date'],
+                columns='feature_col',
+                values='driver_value',
+                aggfunc='first'
             )
+            .reset_index()
+            .merge(
+                pdf[ACT_GRP_COLS + ['Date', target_col]].drop_duplicates(),
+                on=ACT_GRP_COLS + ['Date'],
+                how='left'
+            )
+        )
 
     id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
 
@@ -824,8 +936,12 @@ if sarimax_run:
     )
 
 
+### FILTER IN PLACE HERE FOR PRODUCT CATEGORY DURING TESTING OF THE FORECASTING PARAMETERS
 
-    sarimax_output = actuals_fh_populated.groupBy(*ACT_GRP_COLS).applyInPandas(fit_sarimax, schema=sarimax_schema).cache()
+    sarimax_output = (
+        actuals_fh_populated
+        .groupBy(*ACT_GRP_COLS).applyInPandas(fit_sarimax, schema=sarimax_schema).cache()
+    )
 
     if rerun_historical_forecasts:
         sarimax_output.write.mode('overwrite').parquet(Sarimax_dir)
@@ -865,19 +981,44 @@ def _arimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals, 
         return None
 
     # Prepare target
-    y = pd.to_numeric(train[target_col], errors="coerce")
+    y = np.log1p(
+        pd.to_numeric(train[target_col], errors="coerce")
+    )
 
     # Prepare drivers
     exog_train = None
     exog_future = None
+
+
     if drivers_used:
-        exog_train = train[driver_cols].apply(pd.to_numeric, errors="coerce")
-        exog_future = future[driver_cols].apply(pd.to_numeric, errors="coerce")
+        exog_train = train[driver_cols].apply(
+            pd.to_numeric,
+            errors="coerce"
+        )
+
+        exog_future = future[driver_cols].apply(
+            pd.to_numeric,
+            errors="coerce"
+        )
 
         medians = exog_train.median()
         exog_train = exog_train.fillna(medians)
-        future_medians = exog_future.median()
-        exog_future = exog_future.fillna(future_medians)
+        exog_future = exog_future.fillna(medians)
+
+
+        scaler = StandardScaler()
+
+        exog_train = pd.DataFrame(
+            scaler.fit_transform(exog_train),
+            columns=driver_cols,
+            index=train.index
+        )
+
+        exog_future = pd.DataFrame(
+            scaler.transform(exog_future),
+            columns=driver_cols,
+            index=future.index
+        )
 
     # --------------------------------------------------
     # Determine differencing order
@@ -895,7 +1036,7 @@ def _arimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals, 
         d += 1
 
     # historical scale
-    hist_max_abs = float(y.abs().max())
+    hist_max_abs = float(train[target_col].max())
 
     # --------------------------------------------------
     # Grid Search
@@ -912,35 +1053,38 @@ def _arimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals, 
 
             model = ARIMA(y, **model_kwargs).fit()
 
-            # skip models that failed to converge
-            if not model.mle_retvals.get('converged', False):
-                continue
+            # # skip models that failed to converge
+            # if not model.mle_retvals.get('converged', False):
+            #     continue
 
             ## reject unstable AR and MA models
-            try:
-                if len(model.arroots) > 0:
-                    if np.any(np.abs(model.arroots) <= 1):
-                        continue
+            # try:
+            #     if len(model.arroots) > 0:
+            #         if np.any(np.abs(model.arroots) <= 1):
+            #             continue
 
-                if len(model.maroots) > 0:
-                    if np.any(np.abs(model.maroots) <= 1):
-                        continue
+            #     if len(model.maroots) > 0:
+            #         if np.any(np.abs(model.maroots) <= 1):
+            #             continue
 
-            except Exception:
-                continue
+            # except Exception:
+            #     continue
             
 
             if model.aic < best_aic:
-                try:
-                    trail_kwargs = {'steps': FORECAST_HORIZON}
-                    if drivers_used:
-                        trail_kwargs['exog'] = exog_future
-                    trail_forecast = model.get_forecast(**trail_kwargs).predicted_mean
-                except Exception:
+                trial_forecast = model.get_forecast(
+                    steps=FORECAST_HORIZON,
+                    exog=exog_future if drivers_used else None
+                ).predicted_mean
+                trial_forecast = np.expm1(trial_forecast)
+
+                # reject impossible forecasts
+                if trial_forecast.min() < 0:
                     continue
-                
-                if hist_max_abs > 0 and trail_forecast.abs().max() > 3 * hist_max_abs:
+
+                if trial_forecast.max() > 3 * hist_max_abs:
                     continue
+
                 best_aic = model.aic
                 best_order = (p, d, q)
                 best_model = model
@@ -959,8 +1103,14 @@ def _arimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals, 
         forecast_kwargs["exog"] = exog_future
 
     forecast_result = best_model.get_forecast(**forecast_kwargs)
-    forecast = forecast_result.predicted_mean
-    conf_int = forecast_result.conf_int()
+    forecast = np.expm1(
+        forecast_result.predicted_mean
+    )
+
+    conf_int = np.expm1(
+        forecast_result.conf_int()
+    )
+    forecast = forecast.clip(lower=0)
 
     # --------------------------------------------------
     # Output
@@ -1004,14 +1154,19 @@ def fit_arimax(pdf: pd.DataFrame) -> pd.DataFrame:
     # convert long driver data to wide
     if 'feature_col' in pdf.columns:
         pdf = (
-                pdf.pivot_table(
-                    index=ACT_GRP_COLS+['Date',target_col],
-                    columns='feature_col',
-                    values='driver_value',
-                    aggfunc='first'
-                ).reset_index()
+            pdf.pivot_table(
+                index=ACT_GRP_COLS + ['Date'],
+                columns='feature_col',
+                values='driver_value',
+                aggfunc='first'
             )
-
+            .reset_index()
+            .merge(
+                pdf[ACT_GRP_COLS + ['Date', target_col]].drop_duplicates(),
+                on=ACT_GRP_COLS + ['Date'],
+                how='left'
+            )
+        )
     id_vals = {c: pdf[c].iloc[0] for c in ACT_GRP_COLS}
 
     # Determine driver columns
@@ -1098,7 +1253,11 @@ if arimax_run:
 
 
 
-    arimax_output = actuals_fh_populated.groupBy(*ACT_GRP_COLS).applyInPandas(fit_arimax, schema=arimax_schema).cache()
+    arimax_output = (
+        actuals_fh_populated
+        .groupBy(*ACT_GRP_COLS)
+        .applyInPandas(fit_arimax, schema=arimax_schema)
+        ).cache()
 
     if rerun_historical_forecasts:
         arimax_output.write.mode('overwrite').parquet(Arimax_dir)
