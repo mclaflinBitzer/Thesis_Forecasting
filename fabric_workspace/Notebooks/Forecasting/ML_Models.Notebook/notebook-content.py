@@ -28,7 +28,6 @@
 
 # Welcome to your new notebook
 import numpy as np
-
 from pyspark.sql import DataFrame, functions as F, Window
 from pyspark.ml.feature import StringIndexer, VectorAssembler
 import xgboost as xgb
@@ -40,29 +39,27 @@ import builtins
 from functools import reduce
 
 
+
+
+
 # ==========================================================
 # CONFIG — adjust to your setup
 # ==========================================================
 manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
 automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-
 Topline = True
 rerun_historical_forecasts = True
-driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
-
-
+driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 if Topline:
     actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
     initial_target_col = "Quantity"
     DRV_GRP_COLS = ['Indicator']
     ACT_GRP_COLS = ['Product_Category','series']
-
     if driver_status == 'Manual_Drivers':
         selected_driver_dir = manual_features + "final_features_topline.csv"
     else:
         selected_driver_dir = automated_features + "Topline/topline_xgboost_selected_feature.xlsx"
-
     parquet_dir = parquet_dir + "/Topline/" + driver_status + "/"
     XGB_dir = parquet_dir + "XGBoost_Output.parquet"
 else:
@@ -70,30 +67,28 @@ else:
     initial_target_col = 'Quantity'
     DRV_GRP_COLS = ['Region','Indicator']
     ACT_GRP_COLS = ['Product_Category', 'Region','series']
-
     if driver_status == 'Manual_Drivers':
         selected_driver_dir = manual_features + "final_features_middle.csv"
     else:
         selected_driver_dir = automated_features + "Middle/middle_xgboost_selected_features.xlsx"
-
     parquet_dir = parquet_dir + "/Middle/"
     XGB_dir = parquet_dir + "XGBoost_Output.parquet"
-
 FORECAST_HORIZON = 18
 SEASONAL_PERIODS = 12
 MIN_TRAIN = 36
-STEP_SIZE = 3  # NOTE: with the walk-forward backtest below, this now controls
-               # how many full model retrainings happen — see warning in
-               # fit_xgboost_global. Consider a larger value (e.g. 3 or 6)
-               # if backtesting the global model is too slow at STEP_SIZE=1.
-
+STEP_SIZE = 3  # controls how many full model retrainings happen in the
+               # walk-forward backtest below. Increase if too slow —
+               # does not affect the always-on future forecast.
 driver_table = "Sales_Forecasting.silver.compiled_drivers"
 target_col = 'Value'
-
 if driver_status == "No_Drivers":
     drivers_used = False
 else:
     drivers_used = True
+
+
+
+
 
 ### Reading Data
 actuals = (
@@ -102,61 +97,53 @@ actuals = (
 )
 
 
+
 def add_future_months(df, ACT_GRP_COLS, date_col='Date', horizon=18):
     """
         add future month records for each unique series
     """
     df = df.withColumn(date_col, to_date(col(date_col)))
-    # ============================================================
-    # >>> CHANGE (carried-over bug fix): removed
-    # `df = df.na.fill({'Value': 0})`. This ran on the HISTORICAL
-    # actuals before the future window was even generated, silently
-    # converting every genuine data gap into a fabricated "zero"
-    # month — which corrupts lags, rolling stats, and training labels.
-    # If specific gaps genuinely mean "zero" as a business rule, apply
-    # that explicitly and separately, not implicitly here for every gap.
-    # ============================================================
+
+    global_max_date = df.agg(F.max(date_col).alias('last_date')).collect()[0]['last_date']
+    print(f"using global max date across all series as the forecast origin: {global_max_date}")
 
     last_dates = (
-        df.groupBy(*ACT_GRP_COLS)
-        .agg(max(date_col).alias('last_date'))
+        df.select(*ACT_GRP_COLS).distinct()
+        .withColumn('last_date', lit(global_max_date))
     )
-
     future = (
         last_dates
         .withColumn('offset', explode(sequence(lit(1), lit(horizon))))
         .withColumn(date_col, add_months(col('last_date'), col('offset')))
         .drop('last_date','offset')
     )
-
     missing_cols = [c for c in df.columns if c not in ACT_GRP_COLS + [date_col]]
     for c in missing_cols:
         future = future.withColumn(c, lit(None).cast(df.schema[c].dataType))
-
     future = future.select(df.columns)
     return df.unionByName(future)
 
 
+
+
 actuals_fh_populated = add_future_months(actuals, ACT_GRP_COLS)
+
+
 
 if drivers_used:
     compiled_drivers = spark.read.table(driver_table)
     aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
-
     if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
         world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
         world_agg = world_agg.withColumn("Indicator", concat_ws("__", col("Indicator"), lit("WORLD")))
-
         for cols in DRV_GRP_COLS:
             if cols != 'Indicator':
                 distinct_vals = compiled_drivers.select(cols).distinct()
                 world_agg = world_agg.crossJoin(distinct_vals)
                 print(f"{cols} to the world agg using cross join of distinct values from the drivers data")
-
         aggregated_drivers = aggregated_drivers.unionByName(world_agg)
     else:
         print('world agg already done')
-
     if 'csv' in selected_driver_dir:
         print('reading csv')
         selected_drivers = spark.createDataFrame(
@@ -183,51 +170,45 @@ if drivers_used:
             )
     else:
         raise ValueError(f"Unsupported file type. expected csv or xlsx but received: {selected_driver_dir}")
-
     check_cols = list(dict.fromkeys(ACT_GRP_COLS+DRV_GRP_COLS))
     check_cols.remove('series')
     print(f"selected_driver num distinct records: {selected_drivers.select(*check_cols).distinct().count()}")
     print(f"agg_drivers records: {aggregated_drivers.select(*DRV_GRP_COLS).distinct().count()}")
-
     joined_driver_data = (
         broadcast(selected_drivers).join(aggregated_drivers, [*DRV_GRP_COLS], 'left')
     )
-
     print(f"joined records: {joined_driver_data.select(*check_cols).distinct().count()}")
-
     if (selected_drivers.select(*check_cols).distinct().count()) != (joined_driver_data.select(*check_cols).distinct().count()):
         raise ValueError("There is a mismatch and the number of combinations has changed post selected driver & aggregated driver join")
-
     joined_driver_data = (
         joined_driver_data
         .withColumn("driver_date", add_months(col('Date'), -col('Lag')))
         .drop('Date','rec_lag')
         .withColumnRenamed('Value','driver_value')
     )
-
     join_cols = ACT_GRP_COLS.copy()
     join_cols.remove('series')
-
     conditions = [col(f"a.{c}") == col(f"d.{c}") for c in join_cols]
     conditions.append(col("a.Date") == col("d.driver_date"))
     join_cond = reduce(operator.and_, conditions)
-
     actuals_w_drivers = (
         actuals_fh_populated.alias("a")
         .join(joined_driver_data.alias("d"), join_cond, "left")
         .select("a.*", *[col(f"d.{c}") for c in DRV_GRP_COLS if c not in ACT_GRP_COLS], "d.driver_value", "d.Lag")
     )
-
     drop_cols = [c for c in DRV_GRP_COLS if c not in ACT_GRP_COLS]
-
     actuals_w_drivers = (
         actuals_w_drivers
         .withColumn('feature_col', concat_ws("__", *DRV_GRP_COLS, col("Lag").cast("String")))
         .drop(*drop_cols, "Lag")
     )
-
     actuals_fh_populated = actuals_w_drivers
     print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
+
+
+
+
+
 
 
 ## Data Transformations / Processing
@@ -243,6 +224,7 @@ def pivot_long_to_wide(sdf):
         return sdf
 
 
+
 # ==========================================================
 # STEP 1 — calendar features
 # ==========================================================
@@ -254,11 +236,11 @@ def add_calendar_features(sdf: DataFrame, date_col: str = "Date") -> DataFrame:
     sdf = sdf.withColumn("month_sin", sin(col("month") * (2 * np.pi / 12)))
     sdf = sdf.withColumn("month_cos", cos(col("month") * (2 * np.pi / 12)))
     return sdf
-
-
 LAGS = (1, 2, 3, 6, 12)
 MAX_LAG = builtins.max(LAGS)  # 12
 ROLLING_WINDOWS = (3, 6, 12)
+
+
 
 
 # ==========================================================
@@ -266,29 +248,16 @@ ROLLING_WINDOWS = (3, 6, 12)
 # ==========================================================
 def add_lag_rolling_features(sdf: DataFrame) -> DataFrame:
     w = Window.partitionBy(*ACT_GRP_COLS).orderBy("_dt")
-
-    # ============================================================
-    # >>> CHANGE: compute EVERY raw lag from 1..MAX_LAG (not just the
-    # sparse LAGS set), anchored at the origin (_dt). These are raw
-    # ingredients only — the model-facing lag_{k} columns for k in
-    # LAGS get derived from these PER HORIZON, inside
-    # build_direct_horizon_examples below, so they correctly reflect
-    # what's knowable relative to the TARGET date being forecasted,
-    # not just frozen at the origin.
-    # ============================================================
     for raw_n in range(1, MAX_LAG + 1):
         sdf = sdf.withColumn(f"raw_lag_{raw_n}", lag(col(target_col), raw_n).over(w))
-
     for win in ROLLING_WINDOWS:
         # trailing window EXCLUDING current row -> avoids leakage.
-        # NOTE: rolling features stay anchored to the origin across
-        # every horizon by design — see comment in
-        # build_direct_horizon_examples for why.
         roll_w = w.rowsBetween(-win, -1)
         sdf = sdf.withColumn(f"roll_mean_{win}", avg(col(target_col)).over(roll_w))
         sdf = sdf.withColumn(f"roll_std_{win}", stddev(col(target_col)).over(roll_w))
-
     return sdf
+
+
 
 
 # ==========================================================
@@ -298,6 +267,8 @@ def build_asof_table(sdf: DataFrame) -> DataFrame:
     sdf = add_calendar_features(sdf)
     sdf = add_lag_rolling_features(sdf)
     return sdf
+
+
 
 
 # ==========================================================
@@ -311,6 +282,7 @@ def build_direct_horizon_examples(
     require_label: bool,
 ) -> DataFrame:
 
+
     join_target = (
         actuals_wide_sdf
         .select(
@@ -320,7 +292,6 @@ def build_direct_horizon_examples(
             *driver_cols,
         )
     )
-
     panels = []
     for h in horizon_range:
         step = (
@@ -329,33 +300,18 @@ def build_direct_horizon_examples(
             .withColumn("target_date", add_months(col("_dt"), h))
         )
 
-        # ============================================================
-        # >>> CHANGE: lag_k is now computed RELATIVE TO THE TARGET DATE,
-        # not frozen at the origin.
-        #
-        #   target_date = origin + h
-        #   lag_date    = target_date - k = origin + (h - k)
-        #
-        #   k >  h : lag_date is before the origin -> known history,
-        #            pulled from raw_lag_{k-h} (precomputed at origin).
-        #   k == h : lag_date IS the origin itself -> use the origin's
-        #            own known actual value directly.
-        #   k <  h : lag_date is AFTER the origin -> not knowable
-        #            without a value that hasn't happened yet -> NULL.
-        #
-        # This is why lag_1 is only populated at horizon 1 — at
-        # horizon 2+, "1 month before the target" falls inside the
-        # forecast window itself.
-        # ============================================================
+        # lag_k relative to the TARGET date, not frozen at the origin:
+        #   k >  h : known history, from raw_lag_{k-h}
+        #   k == h : the origin's own known actual
+        #   k <  h : falls after the origin -> NULL
         for k in LAGS:
             if k > h:
                 eff = k - h
                 step = step.withColumn(f"lag_{k}", col(f"raw_lag_{eff}"))
             elif k == h:
                 step = step.withColumn(f"lag_{k}", col(target_col))
-            else:  # k < h
+            else:
                 step = step.withColumn(f"lag_{k}", lit(None).cast("double"))
-        # ============================================================
 
         joined = step.join(
             join_target.select(
@@ -369,15 +325,13 @@ def build_direct_horizon_examples(
             ] + [step["target_date"] == col("_jt_target_date")],
             how="inner" if require_label else "left",
         )
-
         panels.append(joined)
-
     out = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), panels)
-
     if require_label:
         out = out.filter(col("y_target").isNotNull())
-
     return out
+
+
 
 
 # ==========================================================
@@ -394,7 +348,6 @@ def fit_encoders(full_sdf):
 def apply_encoding(sdf: DataFrame, indexers, driver_cols: list):
     for idx in indexers:
         sdf = idx.transform(sdf)
-
     feature_cols = (
         [f"{c}_idx" for c in ACT_GRP_COLS]
         + [f"lag_{l}" for l in LAGS]
@@ -406,6 +359,8 @@ def apply_encoding(sdf: DataFrame, indexers, driver_cols: list):
     return sdf, feature_cols
 
 
+
+
 # ==========================================================
 # STEP 6 — train a global XGBoost model
 # ==========================================================
@@ -413,7 +368,6 @@ def train_xgboost_global(train_sdf: DataFrame, feature_cols):
     train_pdf = train_sdf.select(*feature_cols, "y_target").toPandas()
     X = train_pdf[feature_cols]
     y = train_pdf["y_target"]
-
     model = xgb.XGBRegressor(
         n_estimators=300,
         max_depth=6,
@@ -429,6 +383,8 @@ def train_xgboost_global(train_sdf: DataFrame, feature_cols):
     return model, feature_cols
 
 
+
+
 # ==========================================================
 # MAIN ORCHESTRATOR
 # ==========================================================
@@ -439,16 +395,12 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
     rerun_historical_forecasts = True:
         TRUE walk-forward backtesting — for each historical origin date
         (stepped by STEP_SIZE), a model is trained ONLY on data known
-        up to that origin, then forecasts horizons 1..FORECAST_HORIZON
-        forward from it and compares against real outcomes. This
-        mirrors the rolling-origin backtests in the ARIMA/SARIMAX/
-        Prophet functions, instead of fitting once and evaluating
-        in-sample.
-
-        COST WARNING: this retrains a full global model once PER
-        ORIGIN, across all series each time. Increase STEP_SIZE if
-        this is too slow — it does not affect the future forecast
-        below, which always trains once on the full eligible history.
+        up to that origin, using a version of the actuals table where
+        y_target is masked to NULL for any date beyond that origin
+        (see the "source-level masking" comment inside the loop below).
+        Origin dates are aligned across ALL series (see "origin date
+        selection" block) so a single global model at a given origin
+        has every series already past MIN_TRAIN.
 
     Regardless of that flag, this ALWAYS produces the forward-looking
     forecast for every row where target_col is null.
@@ -462,26 +414,62 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
         + [f"roll_mean_{w}" for w in ROLLING_WINDOWS]
         + [f"roll_std_{w}" for w in ROLLING_WINDOWS]
     )
-    driver_cols = sorted([c for c in sdf.columns if c not in reserved_cols])
 
+    driver_cols = sorted([c for c in sdf.columns if c not in reserved_cols])
     duplicates = [c for c in driver_cols if c in [
         "Forecast_Horizon", "_dt", "month", "quarter", "year", "month_sin", "month_cos"
     ]]
     if duplicates:
         raise ValueError(f"Unexpected engineered columns in driver_cols: {duplicates}")
 
+
     drivers_used_local = len(driver_cols) > 0
     driver_status_col = lit("Y" if drivers_used_local else "N")
-
     indexers = fit_encoders(sdf)
-
     asof_sdf = build_asof_table(sdf.select(*ACT_GRP_COLS, 'Date', target_col))
     in_sample_asof = asof_sdf.filter(col(target_col).isNotNull())
 
-    w_hist = Window.partitionBy(*ACT_GRP_COLS).orderBy("_dt")
-    in_sample_asof = in_sample_asof.withColumn("_hist_row", row_number().over(w_hist))
+    # ============================================================
+    # ORIGIN DATE SELECTION — aligns backtest origins across ALL
+    # series, since one global model is trained per origin. A series
+    # only counts as eligible once it has MIN_TRAIN rows of its own
+    # history; the MAX of each series' own earliest-eligible date
+    # ("latest_min_hist_date") becomes the shared starting point, so
+    # every candidate origin has every series already past MIN_TRAIN.
+    # ============================================================
 
-    eligible = in_sample_asof.filter(col("_hist_row") >= MIN_TRAIN)
+    w_hist = Window.partitionBy(*ACT_GRP_COLS).orderBy("_dt")
+    hist_sdf = in_sample_asof.withColumn("_hist_row", row_number().over(w_hist))
+
+    eligible = hist_sdf.filter(col("_hist_row") >= MIN_TRAIN)
+
+    min_serie_dates = eligible.groupBy(*ACT_GRP_COLS).agg(F.min("_dt").alias("latest_min_hist_date"))
+    latest_min_hist_date = (
+        min_serie_dates.agg(F.max("latest_min_hist_date").alias("latest_min_hist_date")).collect()[0]["latest_min_hist_date"]
+    )
+    print(f"the latest min history date across all series is {latest_min_hist_date}")
+
+    max_known_date = in_sample_asof.agg(F.max("_dt").alias("max_dt")).collect()[0]["max_dt"]
+    two_year_floor = add_months(lit(max_known_date), lit(-24))
+    two_year_floor_date = (
+        in_sample_asof.select(two_year_floor.alias("floor_dt")).limit(1).collect()[0]["floor_dt"]
+    )
+
+    print(f"2-year-back floor for latest_min_hist_date is {two_year_floor_date}")
+
+    if latest_min_hist_date > two_year_floor_date:
+        print(
+            f"latest_min_hist_date ({latest_min_hist_date}) is less than 2 years before "
+            f"the max known date — capping to {two_year_floor_date} instead."
+        )
+        latest_min_hist_date = two_year_floor_date
+    # ============================================================
+
+    print(f"final latest_min_hist_date used for origin selection: {latest_min_hist_date}")
+
+
+    eligible = eligible.filter(col("_dt") >= lit(latest_min_hist_date)).drop("_hist_row")
+    # ============================================================
 
     all_outputs = []
 
@@ -498,24 +486,48 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
               f"— retrains the global model once per origin.")
 
         for origin in origin_dates:
-            train_pool = (
-                in_sample_asof
-                .filter(col("_dt") <= lit(origin))
-                .drop("_hist_row")
+            train_pool = in_sample_asof.filter(col("_dt") <= lit(origin))
+
+            # ============================================================
+            # >>> THE FIX (source-level masking, not a downstream filter):
+            # build a version of `sdf` where target_col (the real Value)
+            # is set to NULL for any Date beyond this origin, BEFORE it's
+            # ever passed into build_direct_horizon_examples / joined in
+            # as y_target. This means a future actual is never
+            # representable as a label for this origin's training run at
+            # all — it doesn't exist in the frame to be joined, rather
+            # than existing and being filtered out afterward. Only
+            # target_col is touched: driver_cols (including forecasted
+            # future driver values) come from this same frame completely
+            # unaffected, since the F.when() below only conditions
+            # target_col, never any other column.
+            # ============================================================
+            masked_actuals_for_origin = sdf.withColumn(
+                target_col,
+                F.when(col("Date") <= lit(origin), col(target_col)).otherwise(lit(None))
             )
+            # ============================================================
 
             train_examples = build_direct_horizon_examples(
-                train_pool, sdf, driver_cols,
+                train_pool, masked_actuals_for_origin, driver_cols,
                 horizon_range=range(1, FORECAST_HORIZON + 1),
                 require_label=True,
             )
+            # (no target_date <= origin filter needed anymore — masking
+            # the source already guarantees no post-origin label can
+            # ever appear in join_target/y_target for this origin's run)
+
             if train_examples.limit(1).count() == 0:
                 continue
 
             train_bt, feature_cols = apply_encoding(train_examples, indexers, driver_cols)
             model_bt, feature_cols = train_xgboost_global(train_bt, feature_cols)
 
-            origin_asof = in_sample_asof.filter(col("_dt") == lit(origin)).drop("_hist_row")
+            origin_asof = in_sample_asof.filter(col("_dt") == lit(origin))
+            # Prediction uses the REAL (unmasked) sdf — origin_examples
+            # is built with require_label=False and only feature_cols are
+            # ever fed to model.predict(), so forecasted future driver
+            # values flow through normally here.
             origin_examples = build_direct_horizon_examples(
                 origin_asof, sdf, driver_cols,
                 horizon_range=range(1, FORECAST_HORIZON + 1),
@@ -557,7 +569,7 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
         in_sample_asof
         .withColumn("_rn", row_number().over(latest_w))
         .filter(col("_rn") == 1)
-        .drop("_rn", "_hist_row")
+        .drop("_rn")
     )
 
     future_examples = build_direct_horizon_examples(
@@ -566,8 +578,11 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
         require_label=False,
     )
 
+    # No masking needed here — labels only ever come from genuinely
+    # observed actuals (require_label=True filters out the null
+    # future rows), so there's no future outcome to leak.
     training_examples = build_direct_horizon_examples(
-        eligible.drop("_hist_row"), sdf, driver_cols,
+        eligible, sdf, driver_cols,
         horizon_range=range(1, FORECAST_HORIZON + 1),
         require_label=True,
     )
@@ -637,23 +652,23 @@ else:
 
 # CELL ********************
 
-temp = spark.read.table(actuals_table)
+# temp = spark.read.table(actuals_table)
 
 
-test = output
-#spark.read.parquet(Prophet_dir).cache()
+# test = output
+# #spark.read.parquet(Prophet_dir).cache()
 
-test_agg = test.groupBy(*ACT_GRP_COLS, 'Date').agg(avg('Forecast').alias('Forecast'))
+# test_agg = test.groupBy(*ACT_GRP_COLS, 'Date').agg(avg('Forecast').alias('Forecast'))
 
 
-test_join = (
-    temp.withColumnRenamed('Quantity','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('ACT')))
-    .unionByName(
-        test_agg.withColumnRenamed('Forecast','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('FORCAST')))
-    )
-)
+# test_join = (
+#     temp.withColumnRenamed('Quantity','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('ACT')))
+#     .unionByName(
+#         test_agg.withColumnRenamed('Forecast','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('FORCAST')))
+#     )
+# )
 
-display(test_join)
+# display(test_join)
 
 # METADATA ********************
 
@@ -718,640 +733,640 @@ display(test_join)
 
 # CELL ********************
 
-# Welcome to your new notebook
-import numpy as np
-
-from pyspark.sql import DataFrame, functions as F, Window
-from pyspark.ml.feature import StringIndexer, VectorAssembler
-import xgboost as xgb
-import pandas as pd
-from pyspark.sql.types import *
-from pyspark.sql.functions import *
-import operator
-import builtins
-from functools import reduce
-from sklearn.metrics import mean_absolute_error
-
-
-# ==========================================================
-# CONFIG — adjust to your setup
-# ==========================================================
-manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
-automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
-parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-
-Topline = True
-rerun_historical_forecasts = True
-driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
-
-
-if Topline:
-    actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
-    initial_target_col = "Quantity"
-    DRV_GRP_COLS = ['Indicator']
-    ACT_GRP_COLS = ['Product_Category','series']
-
-    if driver_status == 'Manual_Drivers':
-        selected_driver_dir = manual_features + "final_features_topline.csv"
-    else:
-        selected_driver_dir = automated_features + "Topline/topline_xgboost_selected_feature.xlsx"
-
-    parquet_dir = parquet_dir + "/Topline/" + driver_status + "/"
-    XGB_dir = parquet_dir + "XGBoost_Output.parquet"
-else:
-    actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
-    initial_target_col = 'Quantity'
-    DRV_GRP_COLS = ['Region','Indicator']
-    ACT_GRP_COLS = ['Product_Category', 'Region','series']
-
-    if driver_status == 'Manual_Drivers':
-        selected_driver_dir = manual_features + "final_features_middle.csv"
-    else:
-        selected_driver_dir = automated_features + "Middle/middle_xgboost_selected_features.xlsx"
-
-    parquet_dir = parquet_dir + "/Middle/"
-    XGB_dir = parquet_dir + "XGBoost_Output.parquet"
-
-FORECAST_HORIZON = 18
-SEASONAL_PERIODS = 12
-MIN_TRAIN = 36
-STEP_SIZE = 3
-
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
-target_col = 'Value'
-
-# ============================================================
-# >>> NEW: hyperparameter tuning config
-# ============================================================
-TUNE_VAL_MONTHS = 6  # holdout window (by target_date) used to score candidate params
-PARAM_GRID = [
-    {"max_depth": 4, "learning_rate": 0.10, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
-    {"max_depth": 6, "learning_rate": 0.05, "n_estimators": 300, "subsample": 0.8, "colsample_bytree": 0.8},
-    {"max_depth": 6, "learning_rate": 0.05, "n_estimators": 300, "subsample": 0.7, "colsample_bytree": 0.7},
-    {"max_depth": 8, "learning_rate": 0.03, "n_estimators": 400, "subsample": 0.7, "colsample_bytree": 0.7},
-]
-# ============================================================
-
-if driver_status == "No_Drivers":
-    drivers_used = False
-else:
-    drivers_used = True
-
-### Reading Data
-actuals = (
-    spark.read.table(actuals_table)
-    .withColumnRenamed(initial_target_col, target_col)
-)
-
-
-def add_future_months(df, ACT_GRP_COLS, date_col='Date', horizon=18):
-    df = df.withColumn(date_col, to_date(col(date_col)))
-
-    last_dates = (
-        df.groupBy(*ACT_GRP_COLS)
-        .agg(max(date_col).alias('last_date'))
-    )
-
-    future = (
-        last_dates
-        .withColumn('offset', explode(sequence(lit(1), lit(horizon))))
-        .withColumn(date_col, add_months(col('last_date'), col('offset')))
-        .drop('last_date','offset')
-    )
-
-    missing_cols = [c for c in df.columns if c not in ACT_GRP_COLS + [date_col]]
-    for c in missing_cols:
-        future = future.withColumn(c, lit(None).cast(df.schema[c].dataType))
-
-    future = future.select(df.columns)
-    return df.unionByName(future)
-
-
-actuals_fh_populated = add_future_months(actuals, ACT_GRP_COLS)
-
-if drivers_used:
-    compiled_drivers = spark.read.table(driver_table)
-    aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
-
-    if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
-        world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
-        world_agg = world_agg.withColumn("Indicator", concat_ws("__", col("Indicator"), lit("WORLD")))
-
-        for cols in DRV_GRP_COLS:
-            if cols != 'Indicator':
-                distinct_vals = compiled_drivers.select(cols).distinct()
-                world_agg = world_agg.crossJoin(distinct_vals)
-                print(f"{cols} to the world agg using cross join of distinct values from the drivers data")
-
-        aggregated_drivers = aggregated_drivers.unionByName(world_agg)
-    else:
-        print('world agg already done')
-
-    if 'csv' in selected_driver_dir:
-        print('reading csv')
-        selected_drivers = spark.createDataFrame(
-            pd.read_csv(selected_driver_dir).drop(columns="Unnamed: 0", errors="ignore")
-        )
-    elif 'xlsx' in selected_driver_dir:
-        print('reading excel')
-        selected_drivers = spark.createDataFrame(
-            pd.read_excel(selected_driver_dir).drop(columns="Unnamed: 0", errors="ignore")
-        )
-        if Topline:
-            selected_drivers = (
-                selected_drivers
-                .withColumn('Lag', split(col('Feature'),"__").getItem(1))
-                .withColumn('Indicator', split(col('Feature'),"__").getItem(0))
-                .drop('Feature')
-            )
-        else:
-            selected_drivers = (
-                selected_drivers
-                .withColumn('Lag', split(col("Feature"),"__").getItem(2))
-                .withColumn("Indicator", split(col("Feature"), "__").getItem(1))
-                .drop('Feature')
-            )
-    else:
-        raise ValueError(f"Unsupported file type. expected csv or xlsx but received: {selected_driver_dir}")
-
-    check_cols = list(dict.fromkeys(ACT_GRP_COLS+DRV_GRP_COLS))
-    check_cols.remove('series')
-    print(f"selected_driver num distinct records: {selected_drivers.select(*check_cols).distinct().count()}")
-    print(f"agg_drivers records: {aggregated_drivers.select(*DRV_GRP_COLS).distinct().count()}")
-
-    joined_driver_data = (
-        broadcast(selected_drivers).join(aggregated_drivers, [*DRV_GRP_COLS], 'left')
-    )
-
-    print(f"joined records: {joined_driver_data.select(*check_cols).distinct().count()}")
-
-    if (selected_drivers.select(*check_cols).distinct().count()) != (joined_driver_data.select(*check_cols).distinct().count()):
-        raise ValueError("There is a mismatch and the number of combinations has changed post selected driver & aggregated driver join")
-
-    joined_driver_data = (
-        joined_driver_data
-        .withColumn("driver_date", add_months(col('Date'), -col('Lag')))
-        .drop('Date','rec_lag')
-        .withColumnRenamed('Value','driver_value')
-    )
-
-    join_cols = ACT_GRP_COLS.copy()
-    join_cols.remove('series')
-
-    conditions = [col(f"a.{c}") == col(f"d.{c}") for c in join_cols]
-    conditions.append(col("a.Date") == col("d.driver_date"))
-    join_cond = reduce(operator.and_, conditions)
-
-    actuals_w_drivers = (
-        actuals_fh_populated.alias("a")
-        .join(joined_driver_data.alias("d"), join_cond, "left")
-        .select("a.*", *[col(f"d.{c}") for c in DRV_GRP_COLS if c not in ACT_GRP_COLS], "d.driver_value", "d.Lag")
-    )
-
-    drop_cols = [c for c in DRV_GRP_COLS if c not in ACT_GRP_COLS]
-
-    actuals_w_drivers = (
-        actuals_w_drivers
-        .withColumn('feature_col', concat_ws("__", *DRV_GRP_COLS, col("Lag").cast("String")))
-        .drop(*drop_cols, "Lag")
-    )
-
-    actuals_fh_populated = actuals_w_drivers
-    print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
-
-
-## Data Transformations / Processing
-def pivot_long_to_wide(sdf):
-    if drivers_used:
-        wide = (
-            sdf.groupBy(*ACT_GRP_COLS,'Date',target_col)
-            .pivot('feature_col')
-            .agg(first('driver_value'))
-        )
-        return wide
-    else:
-        return sdf
-
-
-# ==========================================================
-# STEP 1 — calendar features
-# ==========================================================
-def add_calendar_features(sdf: DataFrame, date_col: str = "Date") -> DataFrame:
-    sdf = sdf.withColumn("_dt", to_date(col(date_col)))
-    sdf = sdf.withColumn("month", month("_dt"))
-    sdf = sdf.withColumn("quarter", quarter("_dt"))
-    sdf = sdf.withColumn("year", year("_dt"))
-    sdf = sdf.withColumn("month_sin", sin(col("month") * (2 * np.pi / 12)))
-    sdf = sdf.withColumn("month_cos", cos(col("month") * (2 * np.pi / 12)))
-    return sdf
-
-
-LAGS = (1, 2, 3, 6, 12)
-MAX_LAG = builtins.max(LAGS)
-ROLLING_WINDOWS = (3, 6, 12)
-
-
-# ==========================================================
-# STEP 2 — per-series lag / rolling features
-# ==========================================================
-def add_lag_rolling_features(sdf: DataFrame) -> DataFrame:
-    w = Window.partitionBy(*ACT_GRP_COLS).orderBy("_dt")
-
-    for raw_n in range(1, MAX_LAG + 1):
-        sdf = sdf.withColumn(f"raw_lag_{raw_n}", lag(col(target_col), raw_n).over(w))
-
-    for win in ROLLING_WINDOWS:
-        roll_w = w.rowsBetween(-win, -1)
-        sdf = sdf.withColumn(f"roll_mean_{win}", avg(col(target_col)).over(roll_w))
-        sdf = sdf.withColumn(f"roll_std_{win}", stddev(col(target_col)).over(roll_w))
-
-    return sdf
-
-
-# ==========================================================
-# STEP 3 — as-of feature snapshot table
-# ==========================================================
-def build_asof_table(sdf: DataFrame) -> DataFrame:
-    sdf = add_calendar_features(sdf)
-    sdf = add_lag_rolling_features(sdf)
-    return sdf
-
-
-# ==========================================================
-# STEP 4 — direct multi-horizon example builder
-# ==========================================================
-def build_direct_horizon_examples(
-    asof_sdf: DataFrame,
-    actuals_wide_sdf: DataFrame,
-    driver_cols: list,
-    horizon_range,
-    require_label: bool,
-) -> DataFrame:
-
-    join_target = (
-        actuals_wide_sdf
-        .select(
-            *ACT_GRP_COLS,
-            to_date("Date").alias("target_date"),
-            col(target_col).alias("y_target"),
-            *driver_cols,
-        )
-    )
-
-    panels = []
-    for h in horizon_range:
-        step = (
-            asof_sdf
-            .withColumn("Forecast_Horizon", lit(h))
-            .withColumn("target_date", add_months(col("_dt"), h))
-        )
-
-        for k in LAGS:
-            if k > h:
-                eff = k - h
-                step = step.withColumn(f"lag_{k}", col(f"raw_lag_{eff}"))
-            elif k == h:
-                step = step.withColumn(f"lag_{k}", col(target_col))
-            else:
-                step = step.withColumn(f"lag_{k}", lit(None).cast("double"))
-
-        joined = step.join(
-            join_target.select(
-                *[join_target[c].alias(f"_jt_{c}") for c in ACT_GRP_COLS],
-                join_target["target_date"].alias("_jt_target_date"),
-                "y_target",
-                *driver_cols,
-            ),
-            on=[
-                step[c] == col(f"_jt_{c}") for c in ACT_GRP_COLS
-            ] + [step["target_date"] == col("_jt_target_date")],
-            how="inner" if require_label else "left",
-        )
-
-        panels.append(joined)
-
-    out = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), panels)
-
-    if require_label:
-        out = out.filter(col("y_target").isNotNull())
-
-    return out
-
-
-# ==========================================================
-# STEP 5 — categorical encoding + feature assembly
-# ==========================================================
-def fit_encoders(full_sdf):
-    indexers = [
-        StringIndexer(inputCol=c, outputCol=f"{c}_idx", handleInvalid="keep").fit(full_sdf)
-        for c in ACT_GRP_COLS
-    ]
-    return indexers
-
-
-def apply_encoding(sdf: DataFrame, indexers, driver_cols: list):
-    for idx in indexers:
-        sdf = idx.transform(sdf)
-
-    feature_cols = (
-        [f"{c}_idx" for c in ACT_GRP_COLS]
-        + [f"lag_{l}" for l in LAGS]
-        + [f"roll_mean_{w}" for w in ROLLING_WINDOWS]
-        + [f"roll_std_{w}" for w in ROLLING_WINDOWS]
-        + ["month", "quarter", "year", "month_sin", "month_cos", "Forecast_Horizon"]
-        + driver_cols
-    )
-    return sdf, feature_cols
-
-
-# ==========================================================
-# STEP 6 — train a global XGBoost model
-# ==========================================================
-def train_xgboost_global(train_sdf: DataFrame, feature_cols, params: dict):
-    """
-    >>> CHANGE: now takes `params` explicitly instead of hardcoding
-    hyperparameters, so both the tuning step and every training call
-    (backtest + final future model) go through the same function using
-    whatever hyperparameters were selected.
-    """
-    train_pdf = train_sdf.select(*feature_cols, "y_target").toPandas()
-    X = train_pdf[feature_cols]
-    y = train_pdf["y_target"]
-
-    model = xgb.XGBRegressor(
-        n_estimators=params["n_estimators"],
-        max_depth=params["max_depth"],
-        learning_rate=params["learning_rate"],
-        subsample=params["subsample"],
-        colsample_bytree=params["colsample_bytree"],
-        objective="reg:squarederror",
-        random_state=42,
-        n_jobs=-1,
-        eval_metric=['rmse', 'mae'],
-    )
-    model.fit(X, y)
-    return model, feature_cols
-
-
-# ==========================================================
-# >>> NEW: hyperparameter tuning (single time-based split, run once)
-# ==========================================================
-def tune_hyperparameters(training_examples: DataFrame, indexers, driver_cols: list, param_grid, val_months: int):
-    """
-    Time-based (NOT random/k-fold) train/validation split: the last
-    `val_months` worth of target_dates are held out as validation, and
-    everything strictly before that is used for training each candidate.
-    Random/k-fold CV would let a fold "validate" on dates that occur
-    before some of its own training examples, which doesn't reflect
-    how the model will actually be used (always predicting forward).
-
-    Runs ONCE, before backtesting or the final future forecast, and the
-    winning params are reused everywhere — retuning per backtest origin
-    would multiply the already-expensive walk-forward loop by the grid
-    size for no real benefit, since hyperparameters aren't expected to
-    need to change origin-to-origin.
-    """
-    assembled, feature_cols = apply_encoding(training_examples, indexers, driver_cols)
-
-    max_target_date = assembled.agg(F.max("target_date")).collect()[0][0]
-    cutoff = pd.Timestamp(max_target_date) - pd.DateOffset(months=val_months)
-    cutoff_date = cutoff.date()
-
-    train_part = assembled.filter(col("target_date") < lit(cutoff_date))
-    val_part = assembled.filter(col("target_date") >= lit(cutoff_date))
-
-    if train_part.limit(1).count() == 0 or val_part.limit(1).count() == 0:
-        print("Not enough data to tune with a real holdout split — falling back to first param set.")
-        return param_grid[0]
-
-    train_pdf = train_part.select(*feature_cols, "y_target").toPandas()
-    val_pdf = val_part.select(*feature_cols, "y_target").toPandas()
-
-    X_train, y_train = train_pdf[feature_cols], train_pdf["y_target"]
-    X_val, y_val = val_pdf[feature_cols], val_pdf["y_target"]
-
-    best_params, best_mae = None, np.inf
-    for params in param_grid:
-        try:
-            model = xgb.XGBRegressor(
-                n_estimators=params["n_estimators"],
-                max_depth=params["max_depth"],
-                learning_rate=params["learning_rate"],
-                subsample=params["subsample"],
-                colsample_bytree=params["colsample_bytree"],
-                objective="reg:squarederror",
-                random_state=42,
-                n_jobs=-1,
-            )
-            model.fit(X_train, y_train)
-            preds = model.predict(X_val)
-            mae = mean_absolute_error(y_val, preds)
-
-            print(f"params={params} -> val_mae={mae:.4f}")
-
-            if mae < best_mae:
-                best_mae = mae
-                best_params = params
-        except Exception as e:
-            print(f"params={params} failed: {e}")
-            continue
-
-    if best_params is None:
-        print("All candidates failed — falling back to first param set.")
-        return param_grid[0]
-
-    print(f"Selected hyperparameters: {best_params} (val_mae={best_mae:.4f})")
-    return best_params
-
-
-# ==========================================================
-# MAIN ORCHESTRATOR
-# ==========================================================
-def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
-    sdf = pivot_long_to_wide(sdf)
-
-    reserved_cols = (
-        ACT_GRP_COLS
-        + ["Date", target_col, "_dt", "month", "quarter", "year", "month_sin", "month_cos", "Forecast_Horizon"]
-        + [f"raw_lag_{n}" for n in range(1, MAX_LAG + 1)]
-        + [f"roll_mean_{w}" for w in ROLLING_WINDOWS]
-        + [f"roll_std_{w}" for w in ROLLING_WINDOWS]
-    )
-    driver_cols = sorted([c for c in sdf.columns if c not in reserved_cols])
-
-    duplicates = [c for c in driver_cols if c in [
-        "Forecast_Horizon", "_dt", "month", "quarter", "year", "month_sin", "month_cos"
-    ]]
-    if duplicates:
-        raise ValueError(f"Unexpected engineered columns in driver_cols: {duplicates}")
-
-    drivers_used_local = len(driver_cols) > 0
-    driver_status_col = lit("Y" if drivers_used_local else "N")
-
-    indexers = fit_encoders(sdf)
-
-    asof_sdf = build_asof_table(sdf.select(*ACT_GRP_COLS, 'Date', target_col))
-    in_sample_asof = asof_sdf.filter(col(target_col).isNotNull())
-
-    w_hist = Window.partitionBy(*ACT_GRP_COLS).orderBy("_dt")
-    in_sample_asof = in_sample_asof.withColumn("_hist_row", row_number().over(w_hist))
-
-    eligible = in_sample_asof.filter(col("_hist_row") >= MIN_TRAIN)
-
-    # ============================================================
-    # >>> NEW: tune hyperparameters ONCE, using the same full training
-    # panel that the final future model will use, BEFORE backtesting
-    # or fitting the future model. Both downstream steps reuse
-    # `best_params`.
-    # ============================================================
-    full_training_examples_for_tuning = build_direct_horizon_examples(
-        eligible.drop("_hist_row"), sdf, driver_cols,
-        horizon_range=range(1, FORECAST_HORIZON + 1),
-        require_label=True,
-    )
-    best_params = tune_hyperparameters(
-        full_training_examples_for_tuning, indexers, driver_cols, PARAM_GRID, TUNE_VAL_MONTHS
-    )
-    # ============================================================
-
-    all_outputs = []
-
-    # --------------------------------------------------
-    # TRUE walk-forward historical backtests
-    # --------------------------------------------------
-    if rerun_historical_forecasts:
-        origin_dates = [
-            r["_dt"] for r in
-            eligible.select("_dt").distinct().orderBy("_dt").collect()
-        ][::STEP_SIZE]
-
-        print(f"Running {len(origin_dates)} walk-forward backtest origin(s) "
-              f"— retrains the global model once per origin.")
-
-        for origin in origin_dates:
-            train_pool = (
-                in_sample_asof
-                .filter(col("_dt") <= lit(origin))
-                .drop("_hist_row")
-            )
-
-            train_examples = build_direct_horizon_examples(
-                train_pool, sdf, driver_cols,
-                horizon_range=range(1, FORECAST_HORIZON + 1),
-                require_label=True,
-            )
-
-            # ============================================================
-            # >>> THE FIX (data leakage): drop any training example whose
-            # target_date falls AFTER the origin. Without this, an as-of
-            # row well before the origin combined with a large horizon
-            # produces a target_date past the origin, and since
-            # `y_target` is joined from the FULL (unfiltered) actuals
-            # table, that example's label is a real outcome the model
-            # couldn't have known yet as of this origin. This is why
-            # backtests were tracking actuals almost exactly — the model
-            # was partially trained on the very outcomes it was
-            # "forecasting." The future-forecast path never had this
-            # problem, since target_col is genuinely null past the last
-            # real actual and require_label=True filters those out —
-            # which is also why the future forecast looked comparatively
-            # flat: it was the honest one all along.
-            # ============================================================
-            train_examples = train_examples.filter(col("target_date") <= lit(origin))
-            # ============================================================
-
-            if train_examples.limit(1).count() == 0:
-                continue
-
-            train_bt, feature_cols = apply_encoding(train_examples, indexers, driver_cols)
-            model_bt, feature_cols = train_xgboost_global(train_bt, feature_cols, best_params)
-
-            origin_asof = in_sample_asof.filter(col("_dt") == lit(origin)).drop("_hist_row")
-            origin_examples = build_direct_horizon_examples(
-                origin_asof, sdf, driver_cols,
-                horizon_range=range(1, FORECAST_HORIZON + 1),
-                require_label=False,
-            )
-            if origin_examples.limit(1).count() == 0:
-                continue
-
-            origin_assembled, _ = apply_encoding(origin_examples, indexers, driver_cols)
-            origin_pdf = origin_assembled.select(
-                *feature_cols, *ACT_GRP_COLS, "_dt", "target_date"
-            ).toPandas()
-
-            if len(origin_pdf) == 0:
-                continue
-
-            origin_pdf["prediction"] = model_bt.predict(origin_pdf[feature_cols])
-            preds_origin = spark.createDataFrame(origin_pdf)
-
-            hist_out = preds_origin.select(
-                *ACT_GRP_COLS,
-                col("_dt").cast("string").alias("Training_End_Date"),
-                "Forecast_Horizon",
-                lit("XGBoost_Global").alias("Forecaster"),
-                driver_status_col.alias("Drivers_Used_Flag"),
-                col("target_date").cast("string").alias("Date"),
-                col("prediction").alias("Forecast"),
-                lit(None).cast("double").alias("Forecast_Lower"),
-                lit(None).cast("double").alias("Forecast_Upper"),
-                lit("Historical").alias("Forecast_Type"),
-            )
-            all_outputs.append(hist_out)
-
-    # --------------------------------------------------
-    # ALWAYS run the true forward-looking forecast
-    # --------------------------------------------------
-    latest_w = Window.partitionBy(*ACT_GRP_COLS).orderBy(col("_dt").desc())
-    latest_asof = (
-        in_sample_asof
-        .withColumn("_rn", row_number().over(latest_w))
-        .filter(col("_rn") == 1)
-        .drop("_rn", "_hist_row")
-    )
-
-    future_examples = build_direct_horizon_examples(
-        latest_asof, sdf, driver_cols,
-        horizon_range=range(1, FORECAST_HORIZON + 1),
-        require_label=False,
-    )
-
-    # This panel has no leakage risk to begin with — labels only ever
-    # come from genuinely observed actuals (require_label=True filters
-    # out the null future rows), so no target_date guard is needed here.
-    training_examples = full_training_examples_for_tuning
-
-    if training_examples.limit(1).count() > 0 and future_examples.limit(1).count() > 0:
-        train_final, feature_cols = apply_encoding(training_examples, indexers, driver_cols)
-        model_final, feature_cols = train_xgboost_global(train_final, feature_cols, best_params)
-
-        future_assembled, _ = apply_encoding(future_examples, indexers, driver_cols)
-        future_pdf = future_assembled.select(
-            *feature_cols, *ACT_GRP_COLS, "_dt", "target_date"
-        ).toPandas()
-
-        future_pdf["prediction"] = model_final.predict(future_pdf[feature_cols])
-        preds_future = spark.createDataFrame(future_pdf)
-
-        future_out = preds_future.select(
-            *ACT_GRP_COLS,
-            col("_dt").cast("string").alias("Training_End_Date"),
-            "Forecast_Horizon",
-            lit("XGBoost_Global").alias("Forecaster"),
-            driver_status_col.alias("Drivers_Used_Flag"),
-            col("target_date").cast("string").alias("Date"),
-            col("prediction").alias("Forecast"),
-            lit(None).cast("double").alias("Forecast_Lower"),
-            lit(None).cast("double").alias("Forecast_Upper"),
-            lit("Future").alias("Forecast_Type"),
-        )
-        all_outputs.append(future_out)
-
-    if len(all_outputs) == 0:
-        return sdf.sparkSession.createDataFrame([], schema=None)
-
-    return reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), all_outputs)
+# # Welcome to your new notebook
+# import numpy as np
+
+# from pyspark.sql import DataFrame, functions as F, Window
+# from pyspark.ml.feature import StringIndexer, VectorAssembler
+# import xgboost as xgb
+# import pandas as pd
+# from pyspark.sql.types import *
+# from pyspark.sql.functions import *
+# import operator
+# import builtins
+# from functools import reduce
+# from sklearn.metrics import mean_absolute_error
+
+
+# # ==========================================================
+# # CONFIG — adjust to your setup
+# # ==========================================================
+# manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
+# automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
+# parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
+
+# Topline = True
+# rerun_historical_forecasts = True
+# driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+
+
+# if Topline:
+#     actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
+#     initial_target_col = "Quantity"
+#     DRV_GRP_COLS = ['Indicator']
+#     ACT_GRP_COLS = ['Product_Category','series']
+
+#     if driver_status == 'Manual_Drivers':
+#         selected_driver_dir = manual_features + "final_features_topline.csv"
+#     else:
+#         selected_driver_dir = automated_features + "Topline/topline_xgboost_selected_feature.xlsx"
+
+#     parquet_dir = parquet_dir + "/Topline/" + driver_status + "/"
+#     XGB_dir = parquet_dir + "XGBoost_Output.parquet"
+# else:
+#     actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
+#     initial_target_col = 'Quantity'
+#     DRV_GRP_COLS = ['Region','Indicator']
+#     ACT_GRP_COLS = ['Product_Category', 'Region','series']
+
+#     if driver_status == 'Manual_Drivers':
+#         selected_driver_dir = manual_features + "final_features_middle.csv"
+#     else:
+#         selected_driver_dir = automated_features + "Middle/middle_xgboost_selected_features.xlsx"
+
+#     parquet_dir = parquet_dir + "/Middle/"
+#     XGB_dir = parquet_dir + "XGBoost_Output.parquet"
+
+# FORECAST_HORIZON = 18
+# SEASONAL_PERIODS = 12
+# MIN_TRAIN = 36
+# STEP_SIZE = 3
+
+# driver_table = "Sales_Forecasting.silver.compiled_drivers"
+# target_col = 'Value'
+
+# # ============================================================
+# # >>> NEW: hyperparameter tuning config
+# # ============================================================
+# TUNE_VAL_MONTHS = 6  # holdout window (by target_date) used to score candidate params
+# PARAM_GRID = [
+#     {"max_depth": 4, "learning_rate": 0.10, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
+#     {"max_depth": 6, "learning_rate": 0.05, "n_estimators": 300, "subsample": 0.8, "colsample_bytree": 0.8},
+#     {"max_depth": 6, "learning_rate": 0.05, "n_estimators": 300, "subsample": 0.7, "colsample_bytree": 0.7},
+#     {"max_depth": 8, "learning_rate": 0.03, "n_estimators": 400, "subsample": 0.7, "colsample_bytree": 0.7},
+# ]
+# # ============================================================
+
+# if driver_status == "No_Drivers":
+#     drivers_used = False
+# else:
+#     drivers_used = True
+
+# ### Reading Data
+# actuals = (
+#     spark.read.table(actuals_table)
+#     .withColumnRenamed(initial_target_col, target_col)
+# )
+
+
+# def add_future_months(df, ACT_GRP_COLS, date_col='Date', horizon=18):
+#     df = df.withColumn(date_col, to_date(col(date_col)))
+
+#     last_dates = (
+#         df.groupBy(*ACT_GRP_COLS)
+#         .agg(max(date_col).alias('last_date'))
+#     )
+
+#     future = (
+#         last_dates
+#         .withColumn('offset', explode(sequence(lit(1), lit(horizon))))
+#         .withColumn(date_col, add_months(col('last_date'), col('offset')))
+#         .drop('last_date','offset')
+#     )
+
+#     missing_cols = [c for c in df.columns if c not in ACT_GRP_COLS + [date_col]]
+#     for c in missing_cols:
+#         future = future.withColumn(c, lit(None).cast(df.schema[c].dataType))
+
+#     future = future.select(df.columns)
+#     return df.unionByName(future)
+
+
+# actuals_fh_populated = add_future_months(actuals, ACT_GRP_COLS)
+
+# if drivers_used:
+#     compiled_drivers = spark.read.table(driver_table)
+#     aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+
+#     if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
+#         world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
+#         world_agg = world_agg.withColumn("Indicator", concat_ws("__", col("Indicator"), lit("WORLD")))
+
+#         for cols in DRV_GRP_COLS:
+#             if cols != 'Indicator':
+#                 distinct_vals = compiled_drivers.select(cols).distinct()
+#                 world_agg = world_agg.crossJoin(distinct_vals)
+#                 print(f"{cols} to the world agg using cross join of distinct values from the drivers data")
+
+#         aggregated_drivers = aggregated_drivers.unionByName(world_agg)
+#     else:
+#         print('world agg already done')
+
+#     if 'csv' in selected_driver_dir:
+#         print('reading csv')
+#         selected_drivers = spark.createDataFrame(
+#             pd.read_csv(selected_driver_dir).drop(columns="Unnamed: 0", errors="ignore")
+#         )
+#     elif 'xlsx' in selected_driver_dir:
+#         print('reading excel')
+#         selected_drivers = spark.createDataFrame(
+#             pd.read_excel(selected_driver_dir).drop(columns="Unnamed: 0", errors="ignore")
+#         )
+#         if Topline:
+#             selected_drivers = (
+#                 selected_drivers
+#                 .withColumn('Lag', split(col('Feature'),"__").getItem(1))
+#                 .withColumn('Indicator', split(col('Feature'),"__").getItem(0))
+#                 .drop('Feature')
+#             )
+#         else:
+#             selected_drivers = (
+#                 selected_drivers
+#                 .withColumn('Lag', split(col("Feature"),"__").getItem(2))
+#                 .withColumn("Indicator", split(col("Feature"), "__").getItem(1))
+#                 .drop('Feature')
+#             )
+#     else:
+#         raise ValueError(f"Unsupported file type. expected csv or xlsx but received: {selected_driver_dir}")
+
+#     check_cols = list(dict.fromkeys(ACT_GRP_COLS+DRV_GRP_COLS))
+#     check_cols.remove('series')
+#     print(f"selected_driver num distinct records: {selected_drivers.select(*check_cols).distinct().count()}")
+#     print(f"agg_drivers records: {aggregated_drivers.select(*DRV_GRP_COLS).distinct().count()}")
+
+#     joined_driver_data = (
+#         broadcast(selected_drivers).join(aggregated_drivers, [*DRV_GRP_COLS], 'left')
+#     )
+
+#     print(f"joined records: {joined_driver_data.select(*check_cols).distinct().count()}")
+
+#     if (selected_drivers.select(*check_cols).distinct().count()) != (joined_driver_data.select(*check_cols).distinct().count()):
+#         raise ValueError("There is a mismatch and the number of combinations has changed post selected driver & aggregated driver join")
+
+#     joined_driver_data = (
+#         joined_driver_data
+#         .withColumn("driver_date", add_months(col('Date'), -col('Lag')))
+#         .drop('Date','rec_lag')
+#         .withColumnRenamed('Value','driver_value')
+#     )
+
+#     join_cols = ACT_GRP_COLS.copy()
+#     join_cols.remove('series')
+
+#     conditions = [col(f"a.{c}") == col(f"d.{c}") for c in join_cols]
+#     conditions.append(col("a.Date") == col("d.driver_date"))
+#     join_cond = reduce(operator.and_, conditions)
+
+#     actuals_w_drivers = (
+#         actuals_fh_populated.alias("a")
+#         .join(joined_driver_data.alias("d"), join_cond, "left")
+#         .select("a.*", *[col(f"d.{c}") for c in DRV_GRP_COLS if c not in ACT_GRP_COLS], "d.driver_value", "d.Lag")
+#     )
+
+#     drop_cols = [c for c in DRV_GRP_COLS if c not in ACT_GRP_COLS]
+
+#     actuals_w_drivers = (
+#         actuals_w_drivers
+#         .withColumn('feature_col', concat_ws("__", *DRV_GRP_COLS, col("Lag").cast("String")))
+#         .drop(*drop_cols, "Lag")
+#     )
+
+#     actuals_fh_populated = actuals_w_drivers
+#     print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
+
+
+# ## Data Transformations / Processing
+# def pivot_long_to_wide(sdf):
+#     if drivers_used:
+#         wide = (
+#             sdf.groupBy(*ACT_GRP_COLS,'Date',target_col)
+#             .pivot('feature_col')
+#             .agg(first('driver_value'))
+#         )
+#         return wide
+#     else:
+#         return sdf
+
+
+# # ==========================================================
+# # STEP 1 — calendar features
+# # ==========================================================
+# def add_calendar_features(sdf: DataFrame, date_col: str = "Date") -> DataFrame:
+#     sdf = sdf.withColumn("_dt", to_date(col(date_col)))
+#     sdf = sdf.withColumn("month", month("_dt"))
+#     sdf = sdf.withColumn("quarter", quarter("_dt"))
+#     sdf = sdf.withColumn("year", year("_dt"))
+#     sdf = sdf.withColumn("month_sin", sin(col("month") * (2 * np.pi / 12)))
+#     sdf = sdf.withColumn("month_cos", cos(col("month") * (2 * np.pi / 12)))
+#     return sdf
+
+
+# LAGS = (1, 2, 3, 6, 12)
+# MAX_LAG = builtins.max(LAGS)
+# ROLLING_WINDOWS = (3, 6, 12)
+
+
+# # ==========================================================
+# # STEP 2 — per-series lag / rolling features
+# # ==========================================================
+# def add_lag_rolling_features(sdf: DataFrame) -> DataFrame:
+#     w = Window.partitionBy(*ACT_GRP_COLS).orderBy("_dt")
+
+#     for raw_n in range(1, MAX_LAG + 1):
+#         sdf = sdf.withColumn(f"raw_lag_{raw_n}", lag(col(target_col), raw_n).over(w))
+
+#     for win in ROLLING_WINDOWS:
+#         roll_w = w.rowsBetween(-win, -1)
+#         sdf = sdf.withColumn(f"roll_mean_{win}", avg(col(target_col)).over(roll_w))
+#         sdf = sdf.withColumn(f"roll_std_{win}", stddev(col(target_col)).over(roll_w))
+
+#     return sdf
+
+
+# # ==========================================================
+# # STEP 3 — as-of feature snapshot table
+# # ==========================================================
+# def build_asof_table(sdf: DataFrame) -> DataFrame:
+#     sdf = add_calendar_features(sdf)
+#     sdf = add_lag_rolling_features(sdf)
+#     return sdf
+
+
+# # ==========================================================
+# # STEP 4 — direct multi-horizon example builder
+# # ==========================================================
+# def build_direct_horizon_examples(
+#     asof_sdf: DataFrame,
+#     actuals_wide_sdf: DataFrame,
+#     driver_cols: list,
+#     horizon_range,
+#     require_label: bool,
+# ) -> DataFrame:
+
+#     join_target = (
+#         actuals_wide_sdf
+#         .select(
+#             *ACT_GRP_COLS,
+#             to_date("Date").alias("target_date"),
+#             col(target_col).alias("y_target"),
+#             *driver_cols,
+#         )
+#     )
+
+#     panels = []
+#     for h in horizon_range:
+#         step = (
+#             asof_sdf
+#             .withColumn("Forecast_Horizon", lit(h))
+#             .withColumn("target_date", add_months(col("_dt"), h))
+#         )
+
+#         for k in LAGS:
+#             if k > h:
+#                 eff = k - h
+#                 step = step.withColumn(f"lag_{k}", col(f"raw_lag_{eff}"))
+#             elif k == h:
+#                 step = step.withColumn(f"lag_{k}", col(target_col))
+#             else:
+#                 step = step.withColumn(f"lag_{k}", lit(None).cast("double"))
+
+#         joined = step.join(
+#             join_target.select(
+#                 *[join_target[c].alias(f"_jt_{c}") for c in ACT_GRP_COLS],
+#                 join_target["target_date"].alias("_jt_target_date"),
+#                 "y_target",
+#                 *driver_cols,
+#             ),
+#             on=[
+#                 step[c] == col(f"_jt_{c}") for c in ACT_GRP_COLS
+#             ] + [step["target_date"] == col("_jt_target_date")],
+#             how="inner" if require_label else "left",
+#         )
+
+#         panels.append(joined)
+
+#     out = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), panels)
+
+#     if require_label:
+#         out = out.filter(col("y_target").isNotNull())
+
+#     return out
+
+
+# # ==========================================================
+# # STEP 5 — categorical encoding + feature assembly
+# # ==========================================================
+# def fit_encoders(full_sdf):
+#     indexers = [
+#         StringIndexer(inputCol=c, outputCol=f"{c}_idx", handleInvalid="keep").fit(full_sdf)
+#         for c in ACT_GRP_COLS
+#     ]
+#     return indexers
+
+
+# def apply_encoding(sdf: DataFrame, indexers, driver_cols: list):
+#     for idx in indexers:
+#         sdf = idx.transform(sdf)
+
+#     feature_cols = (
+#         [f"{c}_idx" for c in ACT_GRP_COLS]
+#         + [f"lag_{l}" for l in LAGS]
+#         + [f"roll_mean_{w}" for w in ROLLING_WINDOWS]
+#         + [f"roll_std_{w}" for w in ROLLING_WINDOWS]
+#         + ["month", "quarter", "year", "month_sin", "month_cos", "Forecast_Horizon"]
+#         + driver_cols
+#     )
+#     return sdf, feature_cols
+
+
+# # ==========================================================
+# # STEP 6 — train a global XGBoost model
+# # ==========================================================
+# def train_xgboost_global(train_sdf: DataFrame, feature_cols, params: dict):
+#     """
+#     >>> CHANGE: now takes `params` explicitly instead of hardcoding
+#     hyperparameters, so both the tuning step and every training call
+#     (backtest + final future model) go through the same function using
+#     whatever hyperparameters were selected.
+#     """
+#     train_pdf = train_sdf.select(*feature_cols, "y_target").toPandas()
+#     X = train_pdf[feature_cols]
+#     y = train_pdf["y_target"]
+
+#     model = xgb.XGBRegressor(
+#         n_estimators=params["n_estimators"],
+#         max_depth=params["max_depth"],
+#         learning_rate=params["learning_rate"],
+#         subsample=params["subsample"],
+#         colsample_bytree=params["colsample_bytree"],
+#         objective="reg:squarederror",
+#         random_state=42,
+#         n_jobs=-1,
+#         eval_metric=['rmse', 'mae'],
+#     )
+#     model.fit(X, y)
+#     return model, feature_cols
+
+
+# # ==========================================================
+# # >>> NEW: hyperparameter tuning (single time-based split, run once)
+# # ==========================================================
+# def tune_hyperparameters(training_examples: DataFrame, indexers, driver_cols: list, param_grid, val_months: int):
+#     """
+#     Time-based (NOT random/k-fold) train/validation split: the last
+#     `val_months` worth of target_dates are held out as validation, and
+#     everything strictly before that is used for training each candidate.
+#     Random/k-fold CV would let a fold "validate" on dates that occur
+#     before some of its own training examples, which doesn't reflect
+#     how the model will actually be used (always predicting forward).
+
+#     Runs ONCE, before backtesting or the final future forecast, and the
+#     winning params are reused everywhere — retuning per backtest origin
+#     would multiply the already-expensive walk-forward loop by the grid
+#     size for no real benefit, since hyperparameters aren't expected to
+#     need to change origin-to-origin.
+#     """
+#     assembled, feature_cols = apply_encoding(training_examples, indexers, driver_cols)
+
+#     max_target_date = assembled.agg(F.max("target_date")).collect()[0][0]
+#     cutoff = pd.Timestamp(max_target_date) - pd.DateOffset(months=val_months)
+#     cutoff_date = cutoff.date()
+
+#     train_part = assembled.filter(col("target_date") < lit(cutoff_date))
+#     val_part = assembled.filter(col("target_date") >= lit(cutoff_date))
+
+#     if train_part.limit(1).count() == 0 or val_part.limit(1).count() == 0:
+#         print("Not enough data to tune with a real holdout split — falling back to first param set.")
+#         return param_grid[0]
+
+#     train_pdf = train_part.select(*feature_cols, "y_target").toPandas()
+#     val_pdf = val_part.select(*feature_cols, "y_target").toPandas()
+
+#     X_train, y_train = train_pdf[feature_cols], train_pdf["y_target"]
+#     X_val, y_val = val_pdf[feature_cols], val_pdf["y_target"]
+
+#     best_params, best_mae = None, np.inf
+#     for params in param_grid:
+#         try:
+#             model = xgb.XGBRegressor(
+#                 n_estimators=params["n_estimators"],
+#                 max_depth=params["max_depth"],
+#                 learning_rate=params["learning_rate"],
+#                 subsample=params["subsample"],
+#                 colsample_bytree=params["colsample_bytree"],
+#                 objective="reg:squarederror",
+#                 random_state=42,
+#                 n_jobs=-1,
+#             )
+#             model.fit(X_train, y_train)
+#             preds = model.predict(X_val)
+#             mae = mean_absolute_error(y_val, preds)
+
+#             print(f"params={params} -> val_mae={mae:.4f}")
+
+#             if mae < best_mae:
+#                 best_mae = mae
+#                 best_params = params
+#         except Exception as e:
+#             print(f"params={params} failed: {e}")
+#             continue
+
+#     if best_params is None:
+#         print("All candidates failed — falling back to first param set.")
+#         return param_grid[0]
+
+#     print(f"Selected hyperparameters: {best_params} (val_mae={best_mae:.4f})")
+#     return best_params
+
+
+# # ==========================================================
+# # MAIN ORCHESTRATOR
+# # ==========================================================
+# def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
+#     sdf = pivot_long_to_wide(sdf)
+
+#     reserved_cols = (
+#         ACT_GRP_COLS
+#         + ["Date", target_col, "_dt", "month", "quarter", "year", "month_sin", "month_cos", "Forecast_Horizon"]
+#         + [f"raw_lag_{n}" for n in range(1, MAX_LAG + 1)]
+#         + [f"roll_mean_{w}" for w in ROLLING_WINDOWS]
+#         + [f"roll_std_{w}" for w in ROLLING_WINDOWS]
+#     )
+#     driver_cols = sorted([c for c in sdf.columns if c not in reserved_cols])
+
+#     duplicates = [c for c in driver_cols if c in [
+#         "Forecast_Horizon", "_dt", "month", "quarter", "year", "month_sin", "month_cos"
+#     ]]
+#     if duplicates:
+#         raise ValueError(f"Unexpected engineered columns in driver_cols: {duplicates}")
+
+#     drivers_used_local = len(driver_cols) > 0
+#     driver_status_col = lit("Y" if drivers_used_local else "N")
+
+#     indexers = fit_encoders(sdf)
+
+#     asof_sdf = build_asof_table(sdf.select(*ACT_GRP_COLS, 'Date', target_col))
+#     in_sample_asof = asof_sdf.filter(col(target_col).isNotNull())
+
+#     w_hist = Window.partitionBy(*ACT_GRP_COLS).orderBy("_dt")
+#     in_sample_asof = in_sample_asof.withColumn("_hist_row", row_number().over(w_hist))
+
+#     eligible = in_sample_asof.filter(col("_hist_row") >= MIN_TRAIN)
+
+#     # ============================================================
+#     # >>> NEW: tune hyperparameters ONCE, using the same full training
+#     # panel that the final future model will use, BEFORE backtesting
+#     # or fitting the future model. Both downstream steps reuse
+#     # `best_params`.
+#     # ============================================================
+#     full_training_examples_for_tuning = build_direct_horizon_examples(
+#         eligible.drop("_hist_row"), sdf, driver_cols,
+#         horizon_range=range(1, FORECAST_HORIZON + 1),
+#         require_label=True,
+#     )
+#     best_params = tune_hyperparameters(
+#         full_training_examples_for_tuning, indexers, driver_cols, PARAM_GRID, TUNE_VAL_MONTHS
+#     )
+#     # ============================================================
+
+#     all_outputs = []
+
+#     # --------------------------------------------------
+#     # TRUE walk-forward historical backtests
+#     # --------------------------------------------------
+#     if rerun_historical_forecasts:
+#         origin_dates = [
+#             r["_dt"] for r in
+#             eligible.select("_dt").distinct().orderBy("_dt").collect()
+#         ][::STEP_SIZE]
+
+#         print(f"Running {len(origin_dates)} walk-forward backtest origin(s) "
+#               f"— retrains the global model once per origin.")
+
+#         for origin in origin_dates:
+#             train_pool = (
+#                 in_sample_asof
+#                 .filter(col("_dt") <= lit(origin))
+#                 .drop("_hist_row")
+#             )
+
+#             train_examples = build_direct_horizon_examples(
+#                 train_pool, sdf, driver_cols,
+#                 horizon_range=range(1, FORECAST_HORIZON + 1),
+#                 require_label=True,
+#             )
+
+#             # ============================================================
+#             # >>> THE FIX (data leakage): drop any training example whose
+#             # target_date falls AFTER the origin. Without this, an as-of
+#             # row well before the origin combined with a large horizon
+#             # produces a target_date past the origin, and since
+#             # `y_target` is joined from the FULL (unfiltered) actuals
+#             # table, that example's label is a real outcome the model
+#             # couldn't have known yet as of this origin. This is why
+#             # backtests were tracking actuals almost exactly — the model
+#             # was partially trained on the very outcomes it was
+#             # "forecasting." The future-forecast path never had this
+#             # problem, since target_col is genuinely null past the last
+#             # real actual and require_label=True filters those out —
+#             # which is also why the future forecast looked comparatively
+#             # flat: it was the honest one all along.
+#             # ============================================================
+#             train_examples = train_examples.filter(col("target_date") <= lit(origin))
+#             # ============================================================
+
+#             if train_examples.limit(1).count() == 0:
+#                 continue
+
+#             train_bt, feature_cols = apply_encoding(train_examples, indexers, driver_cols)
+#             model_bt, feature_cols = train_xgboost_global(train_bt, feature_cols, best_params)
+
+#             origin_asof = in_sample_asof.filter(col("_dt") == lit(origin)).drop("_hist_row")
+#             origin_examples = build_direct_horizon_examples(
+#                 origin_asof, sdf, driver_cols,
+#                 horizon_range=range(1, FORECAST_HORIZON + 1),
+#                 require_label=False,
+#             )
+#             if origin_examples.limit(1).count() == 0:
+#                 continue
+
+#             origin_assembled, _ = apply_encoding(origin_examples, indexers, driver_cols)
+#             origin_pdf = origin_assembled.select(
+#                 *feature_cols, *ACT_GRP_COLS, "_dt", "target_date"
+#             ).toPandas()
+
+#             if len(origin_pdf) == 0:
+#                 continue
+
+#             origin_pdf["prediction"] = model_bt.predict(origin_pdf[feature_cols])
+#             preds_origin = spark.createDataFrame(origin_pdf)
+
+#             hist_out = preds_origin.select(
+#                 *ACT_GRP_COLS,
+#                 col("_dt").cast("string").alias("Training_End_Date"),
+#                 "Forecast_Horizon",
+#                 lit("XGBoost_Global").alias("Forecaster"),
+#                 driver_status_col.alias("Drivers_Used_Flag"),
+#                 col("target_date").cast("string").alias("Date"),
+#                 col("prediction").alias("Forecast"),
+#                 lit(None).cast("double").alias("Forecast_Lower"),
+#                 lit(None).cast("double").alias("Forecast_Upper"),
+#                 lit("Historical").alias("Forecast_Type"),
+#             )
+#             all_outputs.append(hist_out)
+
+#     # --------------------------------------------------
+#     # ALWAYS run the true forward-looking forecast
+#     # --------------------------------------------------
+#     latest_w = Window.partitionBy(*ACT_GRP_COLS).orderBy(col("_dt").desc())
+#     latest_asof = (
+#         in_sample_asof
+#         .withColumn("_rn", row_number().over(latest_w))
+#         .filter(col("_rn") == 1)
+#         .drop("_rn", "_hist_row")
+#     )
+
+#     future_examples = build_direct_horizon_examples(
+#         latest_asof, sdf, driver_cols,
+#         horizon_range=range(1, FORECAST_HORIZON + 1),
+#         require_label=False,
+#     )
+
+#     # This panel has no leakage risk to begin with — labels only ever
+#     # come from genuinely observed actuals (require_label=True filters
+#     # out the null future rows), so no target_date guard is needed here.
+#     training_examples = full_training_examples_for_tuning
+
+#     if training_examples.limit(1).count() > 0 and future_examples.limit(1).count() > 0:
+#         train_final, feature_cols = apply_encoding(training_examples, indexers, driver_cols)
+#         model_final, feature_cols = train_xgboost_global(train_final, feature_cols, best_params)
+
+#         future_assembled, _ = apply_encoding(future_examples, indexers, driver_cols)
+#         future_pdf = future_assembled.select(
+#             *feature_cols, *ACT_GRP_COLS, "_dt", "target_date"
+#         ).toPandas()
+
+#         future_pdf["prediction"] = model_final.predict(future_pdf[feature_cols])
+#         preds_future = spark.createDataFrame(future_pdf)
+
+#         future_out = preds_future.select(
+#             *ACT_GRP_COLS,
+#             col("_dt").cast("string").alias("Training_End_Date"),
+#             "Forecast_Horizon",
+#             lit("XGBoost_Global").alias("Forecaster"),
+#             driver_status_col.alias("Drivers_Used_Flag"),
+#             col("target_date").cast("string").alias("Date"),
+#             col("prediction").alias("Forecast"),
+#             lit(None).cast("double").alias("Forecast_Lower"),
+#             lit(None).cast("double").alias("Forecast_Upper"),
+#             lit("Future").alias("Forecast_Type"),
+#         )
+#         all_outputs.append(future_out)
+
+#     if len(all_outputs) == 0:
+#         return sdf.sparkSession.createDataFrame([], schema=None)
+
+#     return reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), all_outputs)
 
 # METADATA ********************
 
