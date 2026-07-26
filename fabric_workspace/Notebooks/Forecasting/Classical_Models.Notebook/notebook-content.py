@@ -43,22 +43,41 @@ from pyspark.sql.window import Window
 
 # CELL ********************
 
-# temp = spark.read.table('Sales_Forecasting.silver.topline_cutoff_data')
+# temp = spark.read.table('Sales_Forecasting.silver.middle_cutoff_data')
 
 
-# test = spark.read.parquet(Prophet_dir).cache()
+# # Holts_dir 
+# # Arimax_dir
+# # Sarimax_dir
+# # Prophet_dir 
+
+# test = spark.read.parquet(Arimax_dir).cache()
 
 # test_agg = test.groupBy(*ACT_GRP_COLS, 'Date').agg(avg('Forecast').alias('Forecast'))
 
 
 # test_join = (
-#     temp.withColumnRenamed('Quantity','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('ACT')))
+#     temp.withColumnRenamed('Quantity','Value').withColumn('series', concat_ws("__", col('series'), lit('ACT')))
 #     .unionByName(
-#         test_agg.withColumnRenamed('Forecast','Value').withColumn('Product_Category', concat_ws("__", col('Product_Category'), lit('FORCAST')))
+#         test_agg.withColumnRenamed('Forecast','Value').withColumn('series', concat_ws("__", col('series'), lit('FORCAST')))
 #     )
 # )
 
-# display(test_join)
+# display(test_join.filter(col("series").like("PISTON%")))
+
+# display(test_join.filter(col("series").like("AVP%")))
+
+# display(test_join.filter(col("series").like("ALU%")))
+
+# display(test_join.filter(col("series").like("SCROLLS%")))
+
+# display(test_join.filter(col("series").like("SCREWS%")))
+
+# display(test_join.filter(col("series").like("HEXPV%")))
+
+# display(test_join.filter(col("series").like("MAERSK_ELECTRONICS%")))
+
+# display(test_join.filter(col("series").like("MAERSK_COM%")))
 
 # METADATA ********************
 
@@ -75,7 +94,7 @@ automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 ## BASELINE output directories
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
 
-Topline = True
+Topline = False
 rerun_historical_forecasts = True
 ets_run = False
 arimax_run = True
@@ -162,6 +181,7 @@ else:
 # CELL ********************
 
 actuals = spark.read.table(actuals_table).withColumnRenamed(initial_target_col, target_col)
+actuals = actuals.fillna(0, target_col)
 
 # METADATA ********************
 
@@ -267,12 +287,20 @@ if drivers_used:
             pd.read_excel(selected_driver_dir)
             .drop(columns="Unnamed: 0", errors="ignore")
         )
-        selected_drivers = (
-            selected_drivers
-            .withColumn('Indicator', split(col('Feature'),"__").getItem(0))
-            .withColumn("Lag", split(col("Feature"),"__").getItem(1))
-            .withColumnRenamed("Importance_pct",'max_corr')
-        )
+        if Topline:
+            selected_drivers = (
+                selected_drivers  
+                .withColumn('Lag', split(col('Feature'),"__").getItem(1))
+                .withColumn('Indicator', split(col('Feature'),"__").getItem(0))
+                .drop('Feature')
+            )
+        else:
+            selected_drivers = (
+                    selected_drivers
+                    .withColumn('Lag', split(col("Feature"),"__").getItem(2))
+                    .withColumn("Indicator", split(col("Feature"), "__").getItem(1))
+                    .drop('Feature')
+                )
     else:
         raise ValueError(f"Unsupported file type. expected csv or xlsx but received: {selected_driver_dir}")
 
@@ -368,6 +396,8 @@ if drivers_used:
     )
 
     actuals_fh_populated = actuals_w_drivers
+    ## replace null values with 0 so that downstream records aren't dropped when pivoted
+    actuals_fh_populated = actuals_fh_populated.fillna(0, 'driver_value')
     print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
 
 
