@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "TFT_Model"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "0133ec6c-86b2-aacd-4adc-42432515cd13"
+  }
+}
