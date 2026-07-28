@@ -1,12 +1,11 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
-    "type": "Environment",
-    "displayName": "XGBoost_ENV",
-    "description": "Environment"
+    "type": "DataPipeline",
+    "displayName": "XGBoost_Forecasting_Pipeline"
   },
   "config": {
     "version": "2.0",
-    "logicalId": "2448fb99-ede1-b457-4606-3f14733f8d02"
+    "logicalId": "a8c3bd6e-797a-9544-4db3-771b204ccc51"
   }
 }

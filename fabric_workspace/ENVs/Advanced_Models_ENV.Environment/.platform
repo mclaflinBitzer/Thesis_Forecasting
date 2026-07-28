@@ -1,11 +1,12 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
-    "type": "DataPipeline",
-    "displayName": "Driver_Ingestion"
+    "type": "Environment",
+    "displayName": "Advanced_Models_ENV",
+    "description": "Environment"
   },
   "config": {
     "version": "2.0",
-    "logicalId": "23d739ee-6cbf-9c61-4e76-61e2af6a03af"
+    "logicalId": "2448fb99-ede1-b457-4606-3f14733f8d02"
   }
 }

@@ -16,8 +16,34 @@
 # META           "id": "22746de3-183e-4327-a844-dceda0b7165c"
 # META         }
 # META       ]
+# META     },
+# META     "environment": {
+# META       "environmentId": "2448fb99-ede1-b457-4606-3f14733f8d02",
+# META       "workspaceId": "00000000-0000-0000-0000-000000000000"
 # META     }
 # META   }
+# META }
+
+# CELL ********************
+
+%pip install lightning
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+%pip install pytorch_forecasting
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************
@@ -35,6 +61,13 @@ import builtins
 from functools import reduce
 from sklearn.metrics import mean_absolute_error
 import optuna
+import re
+import lightning.pytorch as pl
+from pytorch_forecasting import TemporalFusionTransformer
+from pytorch_forecasting.metrics import QuantileLoss
+from pytorch_forecasting import TimeSeriesDataSet
+from lightning.pytorch.callbacks import EarlyStopping
+from optuna.integration import PyTorchLightningPruningCallback
 
 # METADATA ********************
 
@@ -46,12 +79,12 @@ import optuna
 # CELL ********************
 
 # ==========================================================
-# CONFIG — adjust to your setup
+# CONFIG
 # ==========================================================
 manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
 automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-Topline = True
+Topline = False
 rerun_historical_forecasts = True
 driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 if Topline:
@@ -64,7 +97,7 @@ if Topline:
     else:
         selected_driver_dir = automated_features + "Topline/topline_xgboost_selected_feature.xlsx"
     parquet_dir = parquet_dir + "/Topline/" + driver_status + "/"
-    XGB_dir = parquet_dir + "XGBoost_Output.parquet"
+    TFT_dir = parquet_dir + "TFT_Output.parquet"
 else:
     actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
     initial_target_col = 'Quantity'
@@ -74,8 +107,8 @@ else:
         selected_driver_dir = manual_features + "final_features_middle.csv"
     else:
         selected_driver_dir = automated_features + "Middle/middle_xgboost_selected_features.xlsx"
-    parquet_dir = parquet_dir + "/Middle/"
-    XGB_dir = parquet_dir + "XGBoost_Output.parquet"
+    parquet_dir = parquet_dir + "/Middle/" + driver_status + "/"
+    TFT_dir = parquet_dir + "TFT_Output.parquet"
 FORECAST_HORIZON = 18
 SEASONAL_PERIODS = 12
 MIN_TRAIN = 36
@@ -85,7 +118,7 @@ STEP_SIZE = 3  # controls how many full model retrainings happen in the
 
                
 TUNE_HOLDOUT_MONTHS = FORECAST_HORIZON
-N_OPTUNA_TRIALS = 30
+N_OPTUNA_TRIALS = 10
 OPTUNA_SEED = 42
 ENCODER_LENGTH = 36
 
@@ -110,6 +143,7 @@ else:
 actuals = (
     spark.read.table(actuals_table)
     .withColumnRenamed(initial_target_col, target_col)
+    .fillna(0.0,subset='Value')
 )
 
 # METADATA ********************
@@ -189,33 +223,38 @@ if drivers_used:
                 selected_drivers
                 .withColumn('Lag', split(col('Feature'),"__").getItem(1))
                 .withColumn('Indicator', split(col('Feature'),"__").getItem(0))
-                .drop('Feature')
+                .drop('Feature','Lag')      ## Dropping LAG as TFT will take unlagged values
             )
         else:
             selected_drivers = (
                 selected_drivers
                 .withColumn('Lag', split(col("Feature"),"__").getItem(2))
                 .withColumn("Indicator", split(col("Feature"), "__").getItem(1))
-                .drop('Feature')
+                .drop('Feature','Lag')      ## Dropping LAG as TFT will take unlagged values
             )
     else:
         raise ValueError(f"Unsupported file type. expected csv or xlsx but received: {selected_driver_dir}")
+
+
     check_cols = list(dict.fromkeys(ACT_GRP_COLS+DRV_GRP_COLS))
     check_cols.remove('series')
+
     print(f"selected_driver num distinct records: {selected_drivers.select(*check_cols).distinct().count()}")
     print(f"agg_drivers records: {aggregated_drivers.select(*DRV_GRP_COLS).distinct().count()}")
+
     joined_driver_data = (
         broadcast(selected_drivers).join(aggregated_drivers, [*DRV_GRP_COLS], 'left')
     )
     print(f"joined records: {joined_driver_data.select(*check_cols).distinct().count()}")
+
     if (selected_drivers.select(*check_cols).distinct().count()) != (joined_driver_data.select(*check_cols).distinct().count()):
         raise ValueError("There is a mismatch and the number of combinations has changed post selected driver & aggregated driver join")
+
     joined_driver_data = (
         joined_driver_data
-        .withColumn("driver_date", add_months(col('Date'), -col('Lag')))
-        .drop('Date','rec_lag')
-        .withColumnRenamed('Value','driver_value')
+        .withColumnsRenamed({"Value":"driver_value","Date":"driver_date"})
     )
+
     join_cols = ACT_GRP_COLS.copy()
     join_cols.remove('series')
     conditions = [col(f"a.{c}") == col(f"d.{c}") for c in join_cols]
@@ -224,13 +263,13 @@ if drivers_used:
     actuals_w_drivers = (
         actuals_fh_populated.alias("a")
         .join(joined_driver_data.alias("d"), join_cond, "left")
-        .select("a.*", *[col(f"d.{c}") for c in DRV_GRP_COLS if c not in ACT_GRP_COLS], "d.driver_value", "d.Lag")
+        .select("a.*", *[col(f"d.{c}") for c in DRV_GRP_COLS if c not in ACT_GRP_COLS], "d.driver_value")
     )
     drop_cols = [c for c in DRV_GRP_COLS if c not in ACT_GRP_COLS]
     actuals_w_drivers = (
         actuals_w_drivers
-        .withColumn('feature_col', concat_ws("__", *DRV_GRP_COLS, col("Lag").cast("String")))
-        .drop(*drop_cols, "Lag")
+        .withColumn('feature_col', concat_ws("__", *DRV_GRP_COLS))
+        .drop(*drop_cols)
     )
     actuals_fh_populated = actuals_w_drivers
     print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
@@ -271,20 +310,9 @@ def add_calendar_features(sdf: DataFrame, date_col: str = "Date") -> DataFrame:
     calendar_cols = ['_dt', 'month', 'quarter', 'year', 'month_sin', 'month_cos']
     return sdf, calendar_cols 
 
-# METADATA ********************
+    
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
 
-# CELL ********************
-
-import optuna
-import lightning.pytorch as pl
-
-from pytorch_forecasting import TemporalFusionTransformer
-from pytorch_forecasting.metrics import QuantileLoss
 
 # METADATA ********************
 
@@ -302,13 +330,13 @@ from pytorch_forecasting.metrics import QuantileLoss
 def default_tft_params():
 
     return {
-        "hidden_size": 32,
-        "attention_head_size": 4,
-        "dropout": 0.10,
-        "hidden_continuous_size": 16,
+        "hidden_size": 16,
+        "attention_head_size": 2,
+        "dropout": 0.15,
+        "hidden_continuous_size": 8,
         "learning_rate": 1e-3,
-        "batch_size": 128,
-        "gradient_clip_val": 0.1,
+        "batch_size":128,
+        "gradient_clip_val":0.1,
     }
 
 # METADATA ********************
@@ -323,55 +351,90 @@ def default_tft_params():
 ############################################################
 # Objective
 ############################################################
-def objective(trial):
+def objective(trial, train_data_set, validation_dataset):
     print("Another trail/objective has been run")
 
+    early_stop_callback = EarlyStopping(
+        monitor="val_loss",
+        min_delta=1e-4,
+        patience=5,
+        mode="min",
+    )
+
+    pruning_callback = PyTorchLightningPruningCallback(
+        trial,
+        monitor="val_loss"
+    )
 
     params = {
         "hidden_size":
-            trial.suggest_int(
-                "hidden_size",
-                16,
-                128,
-                step=16,
+            trial.suggest_categorical(
+                "hidden_size",      ## controls the size of the neural network representations 
+                                    ## higher = more complex relationships and more interactions between variables are learned
+                                    ## however higher also leads to increased training time, memory usage and increased risk of overfitting
+
+                ### changing these parameters to reduce the search space of optuna
+                # 16,
+                # 128,
+                # step=16,
+                [8,16,32]
             ),
         "attention_head_size":
-            trial.suggest_int(
-                "attention_head_size",
-                1,
-                8,
+            trial.suggest_categorical(
+                "attention_head_size",      ## multiple heads enable multi-head attention (which previous time steps should the model pay attention to)
+                                            ## head 1 (recent months), head 2 (seasonality), head 3 (long term trend)
+                                            ## the higher number value for attention head size enables the learning of more patterns
+                                            ## However this also leads to more computation, parameters and harder optimization
+                [1,2,4]
+                ### changing these parameters to reduce the search space and computation of optuna
+                # 1,
+                # 8,
             ),
         "dropout":
             trial.suggest_float(
                 "dropout",
-                0.05,
-                0.30,
+                0.05, 
+                0.25,
+                ## changing to reduce optuna time
+                # 0.05,
+                # 0.30,
             ),
         "hidden_continuous_size":
-            trial.suggest_int(
+            trial.suggest_categorical(
                 "hidden_continuous_size",
-                8,
-                64,
-                step=8,
+                [6,16]
+                                ### changing these parameters to reduce the search space and computation of optuna
+                # 8,
+                # 64,
+                # step=8,
             ),
         "learning_rate":
             trial.suggest_float(
                 "learning_rate",
-                1e-4,
-                1e-2,
+                5e-4,
+                3e-3,
+
+                                ### changing these parameters to reduce the search space and computation of optuna
+                # 1e-4,
+                # 1e-2,
                 log=True,
             ),
         "gradient_clip_val":
-            trial.suggest_float(
+            trial.suggest_categorical(
                 "gradient_clip_val",
-                0.01,
-                1.0,
-                log=True,
+                [0.01,0.1,0.3],
+
+                                ### changing these parameters to reduce the search space and computation of optuna
+                # 0.01,
+                # 1.0,
+                # log=True,
             ),
         "batch_size":
             trial.suggest_categorical(
                 "batch_size",
-                [64,128,256],
+                [64,128],
+                                ### changing these parameters to reduce the search space and computation of optuna
+                # [64,128,256],
             ),
     }
 
@@ -381,11 +444,13 @@ def objective(trial):
     train_loader = train_dataset.to_dataloader(
         train=True,
         batch_size=params["batch_size"],
+        num_workers=4,
     )
 
     val_loader = validation_dataset.to_dataloader(
         train=False,
         batch_size=params["batch_size"],
+        num_workers=4,
     )
 
     ########################################################
@@ -411,13 +476,18 @@ def objective(trial):
     ## the data, how many times to run, how to calc errors, update, and validate performance
     ########################################################
     trainer = pl.Trainer(
-        accelerator="auto",
+        accelerator="cpu",
         devices=1,
-        max_epochs=30,
+        max_epochs=15,
+        limit_train_batches=0.8,
         gradient_clip_val=params["gradient_clip_val"],
         logger=False,
         enable_checkpointing=False,
         enable_progress_bar=False,
+        callbacks=[
+            early_stop_callback,
+            pruning_callback
+            ]
     )
 
     ########################################################
@@ -520,12 +590,15 @@ def tune_tft_hyperparameters(
     study = optuna.create_study(
         direction="minimize",
         sampler=optuna.samplers.TPESampler(seed=seed),
+        pruner=optuna.pruners.MedianPruner(
+            n_startup_trials=3,
+            n_warmup_steps=5,
+        ),
     )
-
     print('beginning the optuna study')
     
     study.optimize(
-        objective,
+        lambda trial: objective(trial, train_dataset, valiation_dataset),
         n_trials=n_trials,
     )
 
@@ -534,6 +607,83 @@ def tune_tft_hyperparameters(
     print(study.best_params)
 
     return study.best_params
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+encoder_length=ENCODER_LENGTH
+prediction_length=FORECAST_HORIZON
+static_categoricals=ACT_GRP_COLS
+time_varying_known_reals = driver_cols + calendar_cols
+time_varying_known_reals.remove("_dt")
+time_varying_unknown_reals=[target_col]
+target=target_col
+group_ids=ACT_GRP_COLS
+n_trials=N_OPTUNA_TRIALS
+seed = OPTUNA_SEED
+
+############################################################
+# Create chronological split
+############################################################
+## cutoff date is set by max date - the prediction length (Forecast Horizon)
+max_idx = training_df.time_idx.max()
+cutoff = max_idx - prediction_length
+train_df = training_df[
+    training_df.time_idx <= cutoff
+]
+
+
+############################################################
+# Build TimeSeriesDataSet
+############################################################
+train_dataset = TimeSeriesDataSet(
+    train_df,
+    time_idx="time_idx",
+    target=target,
+    group_ids=group_ids,
+    max_encoder_length=encoder_length,
+    max_prediction_length=prediction_length,
+    static_categoricals=static_categoricals,
+    time_varying_known_reals=time_varying_known_reals,
+    time_varying_unknown_reals=time_varying_unknown_reals,
+    allow_missing_timesteps=True,
+)
+
+validation_dataset = TimeSeriesDataSet.from_dataset(
+    train_dataset,
+    training_df,
+    predict=False,
+    stop_randomization=True,
+)
+
+
+############################################################
+# Run Optuna
+############################################################
+
+study = optuna.create_study(
+    direction="minimize",
+    sampler=optuna.samplers.TPESampler(seed=seed),
+)
+
+print('beginning the optuna study')
+
+study.optimize(
+    objective,
+    n_trials=n_trials,
+)
+
+print("Best Validation Loss:", study.best_value)
+
+print(study.best_params)
+
 
 # METADATA ********************
 
@@ -565,6 +715,9 @@ def fit_TFT_global(sdf):
 
 
     sdf = pivot_long_to_wide(sdf)
+    ### REPLACING "." WITH "____" IN ORDER TO HAVE THE COLUMN NAMES WORK WITH TFT
+    sdf = sdf.toDF(*[c.replace(".", "____") for c in sdf.columns])
+
     excluded_cols = ACT_GRP_COLS + ['Date',target_col]
     driver_cols = [c for c in sdf.columns if c not in excluded_cols]
 
@@ -579,7 +732,17 @@ def fit_TFT_global(sdf):
     display(sdf.orderBy(desc('Date')))
 
     training_df = sdf.filter(col(target_col).isNotNull())
+    training_df = training_df.fillna(0.0, subset=driver_cols)
     display(training_df.orderBy(desc('Date')))
+
+    training_df = training_df.toPandas()
+
+    time_varying_known_reals = driver_cols + calendar_cols
+    time_varying_known_reals.remove("_dt")
+
+
+
+
 
 
     best_params = tune_tft_hyperparameters(
@@ -588,11 +751,12 @@ def fit_TFT_global(sdf):
         prediction_length=FORECAST_HORIZON,
         ## Column CLassification
         static_categoricals=ACT_GRP_COLS,
-        time_varying_known_reals=driver_cols + calendar_cols,
+        time_varying_known_reals=time_varying_known_reals,
         time_varying_unknown_reals=[target_col],
         target=target_col,
         group_ids=ACT_GRP_COLS,
         n_trials=N_OPTUNA_TRIALS,
+        seed=OPTUNA_SEED
     )
 
 
@@ -604,7 +768,7 @@ def fit_TFT_global(sdf):
         max_encoder_length=ENCODER_LENGTH,
         max_prediction_length=FORECAST_HORIZON,
         static_categoricals=ACT_GRP_COLS,
-        time_varying_known_reals=driver_cols + calendar_cols,
+        time_varying_known_reals=time_varying_known_reals,
         time_varying_unknown_reals=[target_col],
         allow_missing_timesteps=True,
     )
@@ -625,8 +789,9 @@ def fit_TFT_global(sdf):
     )
 
     trainer = pl.Trainer(
-        max_epochs=100,
+        max_epochs=50,
         gradient_clip_val=best_params["gradient_clip_val"],
+        num_workers=4,
     )
 
     trainer.fit(
@@ -651,30 +816,6 @@ def fit_TFT_global(sdf):
         model,
         future_loader,
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # METADATA ********************
 

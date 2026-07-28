@@ -17,10 +17,7 @@
 # META         }
 # META       ]
 # META     },
-# META     "environment": {
-# META       "environmentId": "2448fb99-ede1-b457-4606-3f14733f8d02",
-# META       "workspaceId": "00000000-0000-0000-0000-000000000000"
-# META     }
+# META     "environment": {}
 # META   }
 # META }
 
@@ -63,7 +60,7 @@ automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
 Topline = False
 rerun_historical_forecasts = True
-driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+driver_status = "No_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 if Topline:
     actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
     initial_target_col = "Quantity"
@@ -84,7 +81,7 @@ else:
         selected_driver_dir = manual_features + "final_features_middle.csv"
     else:
         selected_driver_dir = automated_features + "Middle/middle_xgboost_selected_features.xlsx"
-    parquet_dir = parquet_dir + "/Middle/"
+    parquet_dir = parquet_dir + "/Middle/" + driver_status + "/"
     XGB_dir = parquet_dir + "XGBoost_Output.parquet"
 FORECAST_HORIZON = 18
 SEASONAL_PERIODS = 12
