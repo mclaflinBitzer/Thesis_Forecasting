@@ -17,13 +17,16 @@
 # META         }
 # META       ]
 # META     },
-# META     "environment": {}
+# META     "environment": {
+# META       "environmentId": "2448fb99-ede1-b457-4606-3f14733f8d02",
+# META       "workspaceId": "00000000-0000-0000-0000-000000000000"
+# META     }
 # META   }
 # META }
 
 # CELL ********************
 
-%pip install optuna
+# %pip install optuna
 
 # METADATA ********************
 
