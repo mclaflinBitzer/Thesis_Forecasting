@@ -886,7 +886,7 @@ def shap_prep(shap_df, driver_df):
         ids= ACT_GRP_COLS + ['Forecast_Horizon'],
         values = driver_cols,
         variableColumnName = 'feature_col',
-        valueColumnName = 'feature_imp'
+        valueColumnName = 'shap_value'
     ).cache()
 
     if 'Region' in ACT_GRP_COLS:

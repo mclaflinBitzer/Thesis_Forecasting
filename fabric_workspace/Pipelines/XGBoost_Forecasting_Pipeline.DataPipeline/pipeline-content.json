@@ -17,6 +17,20 @@
         "name": "XGBoost_Notebook",
         "dependsOn": []
       }
-    ]
+    ],
+    "parameters": {
+      "Topline": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "rerun_historical_forecasts": {
+        "type": "bool",
+        "defaultValue": false
+      },
+      "driver_status": {
+        "type": "string",
+        "defaultValue": "No_Drivers"
+      }
+    }
   }
 }
