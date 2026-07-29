@@ -2,37 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/schedules/1.0.0/schema.json",
   "schedules": [
     {
-      "enabled": false,
-      "jobType": "Execute",
-      "configuration": {
-        "type": "Daily",
-        "startDateTime": "2026-07-28T00:00:00",
-        "endDateTime": "2027-07-28T00:00:00",
-        "localTimeZoneId": "Romance Standard Time",
-        "times": [
-          "11:30"
-        ]
-      },
-      "parameters": [
-        {
-          "name": "Topline",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "rerun_historical_forecasts",
-          "value": false,
-          "type": "Boolean"
-        },
-        {
-          "name": "driver_status",
-          "value": "Manual_Drivers",
-          "type": "Text"
-        }
-      ]
-    },
-    {
-      "enabled": false,
+      "enabled": true,
       "jobType": "Execute",
       "configuration": {
         "type": "Daily",
@@ -40,7 +10,7 @@
         "endDateTime": "2027-07-29T00:00:00",
         "localTimeZoneId": "Romance Standard Time",
         "times": [
-          "12:00"
+          "23:30"
         ]
       },
       "parameters": [
@@ -51,7 +21,77 @@
         },
         {
           "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "ets_run",
           "value": false,
+          "type": "Boolean"
+        },
+        {
+          "name": "arimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "sarimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "prophet_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_stats",
+          "value": "Manual_Drivers",
+          "type": "Text"
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Daily",
+        "startDateTime": "2026-07-29T00:00:00",
+        "endDateTime": "2027-07-29T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "01:30"
+        ]
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "ets_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "arimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "sarimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "prophet_run",
+          "value": true,
           "type": "Boolean"
         },
         {
@@ -70,7 +110,7 @@
         "endDateTime": "2027-07-29T00:00:00",
         "localTimeZoneId": "Romance Standard Time",
         "times": [
-          "17:00"
+          "03:30"
         ]
       },
       "parameters": [
@@ -85,32 +125,22 @@
           "type": "Boolean"
         },
         {
-          "name": "driver_status",
-          "value": "No_Drivers",
-          "type": "Text"
-        }
-      ]
-    },
-    {
-      "enabled": true,
-      "jobType": "Execute",
-      "configuration": {
-        "type": "Daily",
-        "startDateTime": "2026-07-29T00:00:00",
-        "endDateTime": "2027-07-29T00:00:00",
-        "localTimeZoneId": "Romance Standard Time",
-        "times": [
-          "19:30"
-        ]
-      },
-      "parameters": [
-        {
-          "name": "Topline",
-          "value": false,
+          "name": "ets_run",
+          "value": true,
           "type": "Boolean"
         },
         {
-          "name": "rerun_historical_forecasts",
+          "name": "arimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "sarimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "prophet_run",
           "value": true,
           "type": "Boolean"
         },
@@ -130,7 +160,7 @@
         "endDateTime": "2027-07-29T00:00:00",
         "localTimeZoneId": "Romance Standard Time",
         "times": [
-          "21:30"
+          "05:30"
         ]
       },
       "parameters": [
@@ -141,6 +171,26 @@
         },
         {
           "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "ets_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "arimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "sarimax_run",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "prophet_run",
           "value": true,
           "type": "Boolean"
         },

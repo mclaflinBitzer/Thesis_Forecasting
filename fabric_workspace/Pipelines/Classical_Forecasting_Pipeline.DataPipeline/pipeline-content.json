@@ -17,6 +17,33 @@
         "name": "Classical_Forecasting",
         "dependsOn": []
       }
-    ]
+    ],
+    "parameters": {
+      "Topline": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "rerun_historical_forecasts": {
+        "type": "bool",
+        "defaultValue": false
+      },
+      "ets_run": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "arimax_run": {
+        "type": "bool"
+      },
+      "sarimax_run": {
+        "type": "bool"
+      },
+      "prophet_run": {
+        "type": "bool"
+      },
+      "driver_status": {
+        "type": "string",
+        "defaultValue": "No_Drivers"
+      }
+    }
   }
 }

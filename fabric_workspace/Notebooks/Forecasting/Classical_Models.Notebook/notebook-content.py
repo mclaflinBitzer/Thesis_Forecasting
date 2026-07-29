@@ -33,6 +33,11 @@ from functools import reduce
 import builtins
 from sklearn.preprocessing import StandardScaler
 from pyspark.sql.window import Window
+from prophet import Prophet
+import logging
+logging.getLogger("cmdstanpy").setLevel(logging.WARNING)  # Prophet is verbose by default
+from prophet.utilities import regressor_coefficients
+import os
 
 # METADATA ********************
 
@@ -86,23 +91,42 @@ from pyspark.sql.window import Window
 # META   "language_group": "synapse_pyspark"
 # META }
 
-# CELL ********************
+# PARAMETERS CELL ********************
 
-## BASELINE SELECTED DRIVER DIRECTORIES
-manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
-automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
-## BASELINE output directories
-parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-
-Topline = False
-rerun_historical_forecasts = True
+## Parameters to set from the pipeline
+Topline = True
+rerun_historical_forecasts = False
 ets_run = False
 arimax_run = True
 sarimax_run = True
 prophet_run = True
 driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 
+# METADATA ********************
 
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+VALID_DRIVER_STATUS = ["No_Drivers", "Manual_Drivers", "Automated_Drivers"]
+if driver_status not in VALID_DRIVER_STATUS:
+    raise ValueError(
+        f"Invalid driver_status={driver_status}. "
+        f"Expected one of {VALID_DRIVER_STATUS}"
+    )
+
+
+
+
+
+## BASELINE SELECTED DRIVER DIRECTORIES
+manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
+automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
+## BASELINE output directories
+parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
 
 
 if Topline:
@@ -414,13 +438,6 @@ if drivers_used:
 
 # CELL ********************
 
-from prophet import Prophet
-import logging
-logging.getLogger("cmdstanpy").setLevel(logging.WARNING)  # Prophet is verbose by default
-
-
-
-
 # ============================================================
 # fit+forecast logic into a helper, with optional historical backtest loop and the always-on future forecast.
 # ============================================================
@@ -520,12 +537,12 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
                 growth = 'linear',
                 changepoint_prior_scale=params["changepoint_prior_scale"],
                 seasonality_prior_scale=params["seasonality_prior_scale"],
-                seasonality_mode = 'additive', # default is additive which can produce forecasts that exceed the cap or go negative
+                seasonality_mode = 'additive', 
                 yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False,
             )
             if drivers_used:  # only add regressors when drivers exist
                 for c in driver_cols:
-                    m.add_regressor(c, prior_scale=params['regressor_prior_scale'])      #.008 has given the best so far
+                    m.add_regressor(c, prior_scale=params['regressor_prior_scale'])      
             m.fit(train_part[fit_cols])
 
             val_pred = m.predict(val_part[predict_cols])
@@ -543,18 +560,57 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         growth = 'linear',
         changepoint_prior_scale=best_params["changepoint_prior_scale"],
         seasonality_prior_scale=best_params["seasonality_prior_scale"],
-        seasonality_mode='additive',        ## leave as additive (multiplicative doesn't forecast well)
+        seasonality_mode='additive',       
         yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False,
     )
     if drivers_used:  
         for c in driver_cols:
             final_model.add_regressor(
                 c, 
-                prior_scale=best_params['regressor_prior_scale'])  # has a default of 10 but this lead to highly erratic outputs, tried .05 but that flattened the output too much
-                                ## w was too erratic as well, lead to 0 values
+                prior_scale=best_params['regressor_prior_scale'])  
+                                
     final_model.fit(prophet_train[fit_cols])
 
+
+    ## PREDICTING
     forecast = final_model.predict(prophet_future[predict_cols])
+
+    if drivers_used:
+
+        # extract learned driver coefficients
+        coef_df = regressor_coefficients(final_model)
+
+        driver_coefficients = dict(
+            zip(
+                coef_df["regressor"],
+                coef_df["coef"]
+            )
+        )
+
+
+        # calculate driver impact by forecast horizon
+        driver_impacts = []
+
+        for i in range(len(prophet_future)):
+
+            horizon_impact = {}
+
+            for driver in driver_cols:
+
+                coefficient = driver_coefficients[driver]
+
+                horizon_impact[driver] = (
+                    prophet_future[driver].iloc[i] * coefficient
+                )
+
+            driver_impacts.append(horizon_impact)
+
+    else:
+        driver_coefficients = None
+        driver_impacts = None
+
+
+
 
     # enforcing clipping of forecasted values 
     forecast["yhat"] = forecast["yhat"].clip(lower=floor, upper=cap)
@@ -571,6 +627,16 @@ def _prophet_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         "Forecast": forecast["yhat"].values,
         "Forecast_Lower": forecast["yhat_lower"].values,
         "Forecast_Upper": forecast["yhat_upper"].values,
+        "Driver_STDDEV_Coefficients": (
+            [driver_coefficients] * horizon
+            if drivers_used
+            else [None] * horizon
+        ),
+        "Driver_Impacts": (
+            driver_impacts
+            if drivers_used
+            else [None] * horizon
+        ),
         "best_changepoint_prior_scale": best_params["changepoint_prior_scale"],
         "best_seasonality_prior_scale": best_params["seasonality_prior_scale"],
         "best_regressor_prior_scale": best_params['regressor_prior_scale'],
@@ -681,6 +747,8 @@ if prophet_run:
             StructField("Forecast", DoubleType(), True),
             StructField("Forecast_Lower", DoubleType(), True),
             StructField("Forecast_Upper", DoubleType(), True),
+            StructField("Driver_STDDEV_Coefficients", MapType(StringType(), DoubleType()),True),
+            StructField("Driver_Impacts", MapType(StringType(), DoubleType()), True),
             StructField("best_changepoint_prior_scale", DoubleType(), True),
             StructField("best_seasonality_prior_scale", DoubleType(), True),
             StructField("best_regressor_prior_scale", DoubleType(), True),
@@ -836,9 +904,28 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
     if best_model is None:
         return pd.DataFrame([])
 
-    forecast_result = best_model.get_forecast(steps=FORECAST_HORIZON, exog=exog_future)
+    forecast_result = best_model.get_forecast(steps=FORECAST_HORIZON, exog=exog_future)    
     forecast_mean = np.expm1(forecast_result.predicted_mean)
     conf_int = np.expm1(forecast_result.conf_int(alpha=0.05))
+
+
+    ## Extracting the driver coefficients
+    params = best_model.params
+    driver_coefficients = {
+        driver: params.get(driver, np.nan)
+        for driver in driver_cols
+    }
+
+    driver_impacts = []
+    for i in range(len(exog_future)):
+        impacts = {}
+        for driver in driver_cols:
+            impacts = {
+                driver: driver_coefficients[driver] * exog_future.iloc[i][driver]
+                for driver in driver_cols
+            }
+
+        driver_impacts.append(impacts)
 
     out = pd.DataFrame({
         **{c: id_vals[c] for c in ACT_GRP_COLS},
@@ -850,6 +937,12 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         "Forecast": forecast_mean.values,
         "Forecast_Lower": conf_int.iloc[:,0].values,
         "Forecast_Upper": conf_int.iloc[:,1].values,
+            "Driver_STDDEV_Coefficients":
+                [driver_coefficients] * FORECAST_HORIZON
+                if drivers_used else [None] * FORECAST_HORIZON,
+            "Driver_Impacts":
+                driver_impacts
+                if drivers_used else [None] * FORECAST_HORIZON,
         "best_order": str(best_order),
         "aic": best_aic,
     })
@@ -960,13 +1053,13 @@ if sarimax_run:
             StructField("Forecast", DoubleType(), True),
             StructField("Forecast_Lower", DoubleType(), True),
             StructField("Forecast_Upper", DoubleType(), True),
+            StructField("Driver_STDDEV_Coefficients", MapType(StringType(), DoubleType()), True),
+            StructField("Driver_Impacts", MapType(StringType(), DoubleType()), True),
             StructField("best_order", StringType(), True),
             StructField("aic", DoubleType(), True),
         ]
     )
 
-
-### FILTER IN PLACE HERE FOR PRODUCT CATEGORY DURING TESTING OF THE FORECASTING PARAMETERS
 
     sarimax_output = (
         actuals_fh_populated
@@ -1142,6 +1235,34 @@ def _arimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals, 
     )
     forecast = forecast.clip(lower=0)
 
+
+    # --------------------------------------------------
+    # Extract driver coefficients and impacts
+    # --------------------------------------------------
+    driver_coefficients = None
+    driver_impacts = None
+
+    if drivers_used:
+
+        # keep only exogenous variable coefficients
+        coef_lookup = {
+            driver: best_model.params.get(driver, np.nan)
+            for driver in driver_cols
+        }
+
+        driver_coefficients = [coef_lookup] * FORECAST_HORIZON
+
+        driver_impacts = []
+        for i in range(FORECAST_HORIZON):
+
+            impacts = {
+                driver: coef_lookup[driver] * exog_future.iloc[i][driver]
+                for driver in driver_cols
+            }
+
+            driver_impacts.append(impacts)
+
+
     # --------------------------------------------------
     # Output
     # --------------------------------------------------
@@ -1155,6 +1276,12 @@ def _arimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals, 
         "Forecast": forecast.values,
         "Forecast_Lower": conf_int.iloc[:, 0].values,
         "Forecast_Upper": conf_int.iloc[:, 1].values,
+        "Driver_STDDEV_Coefficients":
+            driver_coefficients
+            if drivers_used else [None] * FORECAST_HORIZON,
+        "Driver_Impacts":
+            driver_impacts
+            if drivers_used else [None] * FORECAST_HORIZON,
         "best_order": str(best_order),
         "aic": best_aic,
     })
@@ -1276,6 +1403,8 @@ if arimax_run:
             StructField("Forecast", DoubleType(), True),
             StructField("Forecast_Lower", DoubleType(), True),
             StructField("Forecast_Upper", DoubleType(), True),
+            StructField("Driver_STDDEV_Coefficients", MapType(StringType(), DoubleType()), True),
+            StructField("Driver_Impacts", MapType(StringType(), DoubleType()), True),
             StructField("best_order", StringType(), True),
             StructField("aic", DoubleType(), True),
         ]
