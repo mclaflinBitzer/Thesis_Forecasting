@@ -26,7 +26,7 @@
 
 # CELL ********************
 
-%pip install lightning
+# %pip install lightning
 
 # METADATA ********************
 
@@ -37,7 +37,7 @@
 
 # CELL ********************
 
-%pip install pytorch_forecasting
+# %pip install pytorch_forecasting
 
 # METADATA ********************
 
@@ -62,12 +62,19 @@ from functools import reduce
 from sklearn.metrics import mean_absolute_error
 import optuna
 import re
-import lightning.pytorch as pl
+
 from pytorch_forecasting import TemporalFusionTransformer
 from pytorch_forecasting.metrics import QuantileLoss
 from pytorch_forecasting import TimeSeriesDataSet
-from lightning.pytorch.callbacks import EarlyStopping
+
 from optuna.integration import PyTorchLightningPruningCallback
+
+# import pytorch_lightning as pl
+# from pytorch_lightning.callbacks import EarlyStopping
+
+## old imports when using the pip install commented out above:
+import lightning.pytorch as pl
+from lightning.pytorch.callbacks import EarlyStopping
 
 # METADATA ********************
 
@@ -84,8 +91,8 @@ from optuna.integration import PyTorchLightningPruningCallback
 manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
 automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-Topline = False
-rerun_historical_forecasts = True
+Topline = True
+rerun_historical_forecasts = False
 driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 if Topline:
     actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
@@ -118,7 +125,7 @@ STEP_SIZE = 3  # controls how many full model retrainings happen in the
 
                
 TUNE_HOLDOUT_MONTHS = FORECAST_HORIZON
-N_OPTUNA_TRIALS = 10
+N_OPTUNA_TRIALS =  2 #10 temp placement just for testing/verification
 OPTUNA_SEED = 42
 ENCODER_LENGTH = 36
 
@@ -351,7 +358,7 @@ def default_tft_params():
 ############################################################
 # Objective
 ############################################################
-def objective(trial, train_data_set, validation_dataset):
+def objective(trial, train_dataset, validation_dataset):
     print("Another trail/objective has been run")
 
     early_stop_callback = EarlyStopping(
@@ -441,16 +448,17 @@ def objective(trial, train_data_set, validation_dataset):
     ########################################################
     # DataLoaders
     ########################################################
+    print("creating train and val data loaders")
     train_loader = train_dataset.to_dataloader(
         train=True,
         batch_size=params["batch_size"],
-        num_workers=4,
+        num_workers=10,
     )
 
     val_loader = validation_dataset.to_dataloader(
         train=False,
         batch_size=params["batch_size"],
-        num_workers=4,
+        num_workers=10,
     )
 
     ########################################################
@@ -459,6 +467,7 @@ def objective(trial, train_data_set, validation_dataset):
     ## this builds out the layers, weights, and input feature ingestion / how to produce predictions
     ## however it has not trained on the data yet
     ########################################################
+    print("building TFT model based upon train dataset and trial params")
     model = TemporalFusionTransformer.from_dataset(
         train_dataset,
         learning_rate=params["learning_rate"],
@@ -475,6 +484,7 @@ def objective(trial, train_data_set, validation_dataset):
     ## the trainer is the manager of the process and outlines the following
     ## the data, how many times to run, how to calc errors, update, and validate performance
     ########################################################
+    print("creating the trainer")
     trainer = pl.Trainer(
         accelerator="cpu",
         devices=1,
@@ -498,7 +508,7 @@ def objective(trial, train_data_set, validation_dataset):
     ## the model predicts based on this input and calcualtes loss
     ## the model then backpropagates (what weight caused this error) and then updates/adjusts
     ########################################################
-
+    print("fitting the model")
     trainer.fit(
         model,
         train_loader,
@@ -510,6 +520,7 @@ def objective(trial, train_data_set, validation_dataset):
     ## this is just extracting the val_loss metric from the trainer
     ## how well did this trained model perform on unseen data?
     ########################################################
+    print("Beginning model evaluation")
     score = trainer.validate(
         model,
         val_loader,
@@ -517,7 +528,9 @@ def objective(trial, train_data_set, validation_dataset):
     )[0]["val_loss"]
 
     print('returning the score of the trail/run')
-
+    print(f'score was {score}')
+    print('END OF TRIAL')
+    print("="*80)
     return score
 
 # METADATA ********************
@@ -548,7 +561,7 @@ def tune_tft_hyperparameters(
     -------
     best_params : dict
     """
-
+    print('creating chronological split')
     ############################################################
     # Create chronological split
     ############################################################
@@ -558,7 +571,11 @@ def tune_tft_hyperparameters(
     train_df = training_df[
         training_df.time_idx <= cutoff
     ]
+    validation_df = training_df[training_df.time_idx > cutoff-encoder_length]
+    print(f'split with cutoff date of: {cutoff}')
 
+
+    print('building train timeseriesdataset')
     ############################################################
     # Build TimeSeriesDataSet
     ############################################################
@@ -575,10 +592,11 @@ def tune_tft_hyperparameters(
         allow_missing_timesteps=True,
     )
 
+    print("building validation timeseriesdataset")
     validation_dataset = TimeSeriesDataSet.from_dataset(
         train_dataset,
-        training_df,
-        predict=False,
+        validation_df,
+        predict=True,
         stop_randomization=True,
     )
 
@@ -587,6 +605,7 @@ def tune_tft_hyperparameters(
     # Run Optuna
     ############################################################
 
+    print('running optuna')
     study = optuna.create_study(
         direction="minimize",
         sampler=optuna.samplers.TPESampler(seed=seed),
@@ -598,7 +617,7 @@ def tune_tft_hyperparameters(
     print('beginning the optuna study')
     
     study.optimize(
-        lambda trial: objective(trial, train_dataset, valiation_dataset),
+        lambda trial: objective(trial, train_dataset, validation_dataset),
         n_trials=n_trials,
     )
 
@@ -607,83 +626,6 @@ def tune_tft_hyperparameters(
     print(study.best_params)
 
     return study.best_params
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-encoder_length=ENCODER_LENGTH
-prediction_length=FORECAST_HORIZON
-static_categoricals=ACT_GRP_COLS
-time_varying_known_reals = driver_cols + calendar_cols
-time_varying_known_reals.remove("_dt")
-time_varying_unknown_reals=[target_col]
-target=target_col
-group_ids=ACT_GRP_COLS
-n_trials=N_OPTUNA_TRIALS
-seed = OPTUNA_SEED
-
-############################################################
-# Create chronological split
-############################################################
-## cutoff date is set by max date - the prediction length (Forecast Horizon)
-max_idx = training_df.time_idx.max()
-cutoff = max_idx - prediction_length
-train_df = training_df[
-    training_df.time_idx <= cutoff
-]
-
-
-############################################################
-# Build TimeSeriesDataSet
-############################################################
-train_dataset = TimeSeriesDataSet(
-    train_df,
-    time_idx="time_idx",
-    target=target,
-    group_ids=group_ids,
-    max_encoder_length=encoder_length,
-    max_prediction_length=prediction_length,
-    static_categoricals=static_categoricals,
-    time_varying_known_reals=time_varying_known_reals,
-    time_varying_unknown_reals=time_varying_unknown_reals,
-    allow_missing_timesteps=True,
-)
-
-validation_dataset = TimeSeriesDataSet.from_dataset(
-    train_dataset,
-    training_df,
-    predict=False,
-    stop_randomization=True,
-)
-
-
-############################################################
-# Run Optuna
-############################################################
-
-study = optuna.create_study(
-    direction="minimize",
-    sampler=optuna.samplers.TPESampler(seed=seed),
-)
-
-print('beginning the optuna study')
-
-study.optimize(
-    objective,
-    n_trials=n_trials,
-)
-
-print("Best Validation Loss:", study.best_value)
-
-print(study.best_params)
-
 
 # METADATA ********************
 
@@ -740,8 +682,7 @@ def fit_TFT_global(sdf):
     time_varying_known_reals = driver_cols + calendar_cols
     time_varying_known_reals.remove("_dt")
 
-
-
+    sdf=sdf.toPandas()
 
 
 
@@ -791,7 +732,7 @@ def fit_TFT_global(sdf):
     trainer = pl.Trainer(
         max_epochs=50,
         gradient_clip_val=best_params["gradient_clip_val"],
-        num_workers=4,
+        enable_progress_bar=False
     )
 
     trainer.fit(
@@ -817,6 +758,35 @@ def fit_TFT_global(sdf):
         future_loader,
     )
 
+    ## CODE TO EXTRACT IMPORTANCE METRICS
+    interpretation = model.interpret_output(
+        predictions.output,
+        reduction="sum",
+    )
+
+    ## TFT does not produce static coefficients like classical models. it instead has dynamic importance 
+        # scores that change for every forecast, target series, month, and forecast horizon
+
+
+    ## THIS WILL CREATE 4 PLOTS
+        # Static Variable Importance (ACT_GRP_COLS)
+                # feature sthat never change within a series
+                # this would output the importance of each of the ACT_GRP_COLS for the specific forecast scenario 
+                # (ie the region was more important than product category)
+        # Encoder Variable Importance
+                # variables observed before the forecast begins and their weight
+                # provides the importance of the input variables (includes driver_cols as well as historical target_col)
+        # Decoder Variable Importance
+                # variables known in advance during forecasting (most likely use this metric)
+                # which future information mattered most when producing forecast values
+        # Attention Weights
+                # this explains which historical time periods mattered 
+                # attention is not about variables/drivers it is instead highlighting which historical time periods the model looked at
+                # ie period with the highest attention value means that the values from this historical period had the most influence on this particular forecast 
+    model.plot_interpretation(interpretation)
+
+    return predictions
+
 # METADATA ********************
 
 # META {
@@ -826,6 +796,128 @@ def fit_TFT_global(sdf):
 
 # CELL ********************
 
+sdf = actuals_fh_populated
+
+
+sdf = pivot_long_to_wide(sdf)
+### REPLACING "." WITH "____" IN ORDER TO HAVE THE COLUMN NAMES WORK WITH TFT
+sdf = sdf.toDF(*[c.replace(".", "____") for c in sdf.columns])
+
+excluded_cols = ACT_GRP_COLS + ['Date',target_col]
+driver_cols = [c for c in sdf.columns if c not in excluded_cols]
+
+sdf, calendar_cols = add_calendar_features(sdf)
+
+## creating time index column based on the Date column by *ACT_GRP_COLS
+min_date = sdf.agg(min("Date")).first()[0]
+sdf = sdf.withColumn(
+    'time_idx', 
+    months_between(col('Date'), lit(min_date)).cast('int'))
+
+display(sdf.orderBy(desc('Date')))
+
+training_df = sdf.filter(col(target_col).isNotNull())
+training_df = training_df.fillna(0.0, subset=driver_cols)
+display(training_df.orderBy(desc('Date')))
+
+training_df = training_df.toPandas()
+
+time_varying_known_reals = driver_cols + calendar_cols
+time_varying_known_reals.remove("_dt")
+
+
+sdf=sdf.fillna(0.0, subset=driver_cols)
+## need to also fill the target_col with 0 prior to ingestion for predictions as NaN/Nulls are not allowed
+sdf=sdf.fillna(0.0, subset=target_col)
+sdf=sdf.toPandas()
+
+
+print("BEGINNING TFT HYPERPARAMETER TUNING")
+print("="*80)
+
+best_params = tune_tft_hyperparameters(
+    training_df,
+    encoder_length=ENCODER_LENGTH,
+    prediction_length=FORECAST_HORIZON,
+    ## Column CLassification
+    static_categoricals=ACT_GRP_COLS,
+    time_varying_known_reals=time_varying_known_reals,
+    time_varying_unknown_reals=[target_col],
+    target=target_col,
+    group_ids=ACT_GRP_COLS,
+    n_trials=N_OPTUNA_TRIALS,
+    seed=OPTUNA_SEED
+)
+
+
+full_dataset = TimeSeriesDataSet(
+    training_df,
+    time_idx="time_idx",
+    target=target_col,
+    group_ids=ACT_GRP_COLS,
+    max_encoder_length=ENCODER_LENGTH,
+    max_prediction_length=FORECAST_HORIZON,
+    static_categoricals=ACT_GRP_COLS,
+    time_varying_known_reals=time_varying_known_reals,
+    time_varying_unknown_reals=[target_col],
+    allow_missing_timesteps=True,
+)
+
+train_loader = full_dataset.to_dataloader(
+    train=True,
+    batch_size=best_params["batch_size"],
+)
+
+model = TemporalFusionTransformer.from_dataset(
+    full_dataset,
+    learning_rate=best_params["learning_rate"],
+    hidden_size=best_params["hidden_size"],
+    attention_head_size=best_params["attention_head_size"],
+    hidden_continuous_size=best_params["hidden_continuous_size"],
+    dropout=best_params["dropout"],
+    loss=QuantileLoss(),
+)
+
+trainer = pl.Trainer(
+    max_epochs=50,
+    gradient_clip_val=best_params["gradient_clip_val"],
+    enable_progress_bar=False
+)
+
+trainer.fit(
+    model,
+    train_loader,
+)
+
+## Creating Future DataSet / Predictions
+future_dataset = TimeSeriesDataSet.from_dataset(
+    full_dataset,
+    sdf,
+    predict=True,
+    stop_randomization=True,
+)
+
+future_loader = future_dataset.to_dataloader(
+    train=False,
+    batch_size=best_params['batch_size'],
+)
+
+predictions = trainer.predict(
+    model,
+    future_loader,
+)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+future_check = sdf.copy()
+future_check.isna().sum().sort_values(ascending=False)
 
 # METADATA ********************
 

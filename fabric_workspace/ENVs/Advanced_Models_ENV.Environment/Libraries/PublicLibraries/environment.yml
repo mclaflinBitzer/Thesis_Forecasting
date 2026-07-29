@@ -1,3 +1,6 @@
 dependencies:
   - pip:
+      - optuna-integration==4.9.0
+      - lightning==2.6.5
+      - pytorch-forecasting==1.8.0
       - optuna==4.9.0
