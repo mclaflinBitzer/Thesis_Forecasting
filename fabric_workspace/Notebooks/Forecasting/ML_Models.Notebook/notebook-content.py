@@ -35,6 +35,32 @@
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# PARAMETERS CELL ********************
+
+## Parameters that I want the ability to override from the Pipeline during execution
+Topline = True
+rerun_historical_forecasts = False
+driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+import shap
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # CELL ********************
 
 # Welcome to your new notebook
@@ -52,7 +78,12 @@ from sklearn.metrics import mean_absolute_error
 import optuna
 
 
-
+VALID_DRIVER_STATUS = ["No_Drivers", "Manual_Drivers", "Automated_Drivers"]
+if driver_status not in VALID_DRIVER_STATUS:
+    raise ValueError(
+        f"Invalid driver_status={driver_status}. "
+        f"Expected one of {VALID_DRIVER_STATUS}"
+    )
 
 
 # ==========================================================
@@ -61,9 +92,7 @@ import optuna
 manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
 automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-Topline = False
-rerun_historical_forecasts = True
-driver_status = "No_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+
 if Topline:
     actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
     initial_target_col = "Quantity"
@@ -75,6 +104,8 @@ if Topline:
         selected_driver_dir = automated_features + "Topline/topline_xgboost_selected_feature.xlsx"
     parquet_dir = parquet_dir + "/Topline/" + driver_status + "/"
     XGB_dir = parquet_dir + "XGBoost_Output.parquet"
+    XGB_SHAP_forecast_dir = parquet_dir + "XGBoost_SHAP_FORECAST.parquet"
+    XGB_SHAP_training_dir = parquet_dir + "XGBoost_SHAP_TRAINING.parquet"
 else:
     actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
     initial_target_col = 'Quantity'
@@ -86,6 +117,10 @@ else:
         selected_driver_dir = automated_features + "Middle/middle_xgboost_selected_features.xlsx"
     parquet_dir = parquet_dir + "/Middle/" + driver_status + "/"
     XGB_dir = parquet_dir + "XGBoost_Output.parquet"
+    XGB_SHAP_forecast_dir = parquet_dir + "XGBoost_SHAP_FORECAST.parquet"
+    XGB_SHAP_training_dir = parquet_dir + "XGBoost_SHAP_TRAINING.parquet"
+
+
 FORECAST_HORIZON = 18
 SEASONAL_PERIODS = 12
 MIN_TRAIN = 36
@@ -177,7 +212,7 @@ if drivers_used:
                 selected_drivers
                 .withColumn('Lag', split(col('Feature'),"__").getItem(1))
                 .withColumn('Indicator', split(col('Feature'),"__").getItem(0))
-                .drop('Feature')
+                .drop('Feature','rec_lag')
             )
         else:
             selected_drivers = (
@@ -765,6 +800,36 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
         future_pdf["prediction"] = future_pdf["prediction"].clip(lower=0)
         preds_future = spark.createDataFrame(future_pdf)
 
+
+
+        ## Extracting SHAP values per target series on forecasted values
+        shap_explainer = shap.TreeExplainer(model_final)
+        X_shap = future_pdf[feature_cols]
+        shap_values = shap_explainer.shap_values(X_shap)
+        shap_df = pd.DataFrame(shap_values, columns=feature_cols)
+        for c in ACT_GRP_COLS:
+            shap_df[c] = future_pdf[c].values
+        shap_df['Forecast_Horizon'] = future_pdf['Forecast_Horizon'].values
+
+        ## Writing the SHAP value extract out
+        shap_forecast_output = spark.createDataFrame(shap_df)
+
+
+        ## Doing the same for TRAINING DATA 
+        train_pdf = train_final.toPandas()
+        X_shap = train_pdf[feature_cols]
+        shap_values = shap_explainer.shap_values(X_shap)
+        shap_df = pd.DataFrame(shap_values, columns=feature_cols)
+        for c in ACT_GRP_COLS:
+            shap_df[c] = train_pdf[c].values
+        shap_df['Forecast_Horizon'] = train_pdf['Forecast_Horizon'].values
+
+        ## Writing the SHAP value extract out
+        shap_training_output = spark.createDataFrame(shap_df)
+
+
+
+
         future_out = preds_future.select(
             *ACT_GRP_COLS,
             col("_dt").cast("string").alias("Training_End_Date"),
@@ -782,7 +847,7 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
     if len(all_outputs) == 0:
         return sdf.sparkSession.createDataFrame([], schema=None)
 
-    return reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), all_outputs)
+    return reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), all_outputs), shap_forecast_output, shap_training_output
 
 # METADATA ********************
 
@@ -793,7 +858,98 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
 
 # CELL ********************
 
-output = fit_xgboost_global(actuals_fh_populated).cache()
+output, shap_forecast, shap_training = fit_xgboost_global(actuals_fh_populated)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+def shap_prep(shap_df, driver_df):
+
+    indx_grp_cols = [f"{c}_idx" for c in ACT_GRP_COLS]
+
+    shap_df = shap_df.toDF(
+        *[c.replace(".", "____") for c in shap_df.columns]
+    )
+
+    driver_cols = [
+        c for c in shap_df.columns 
+        if c not in ACT_GRP_COLS + indx_grp_cols + ['Forecast_Horizon']
+    ]
+
+    shap_long_df = shap_df.melt(
+        ids= ACT_GRP_COLS + ['Forecast_Horizon'],
+        values = driver_cols,
+        variableColumnName = 'feature_col',
+        valueColumnName = 'feature_imp'
+    ).cache()
+
+    if 'Region' in ACT_GRP_COLS:
+        shap_long_df = shap_long_df.withColumn('Region', regexp_replace(col("Region"),r"\.","____"))
+        shap_long_df = shap_long_df.withColumn('feature_region', split(col('feature_col'),"__").getItem(0))
+        shap_long_df = shap_long_df.filter(col('Region')==col('feature_region'))
+        shap_long_df = (
+            shap_long_df
+            .withColumn('feature', split(col('feature_col'),"__").getItem(1))
+            .withColumn('Lag', split(col('feature_col'),"__").getItem(2))
+            .withColumn('feature_col', concat_ws("__",col('feature'),col('Lag')))
+            .drop('feature','Lag','feature_region')
+        )
+
+    join_cols = ACT_GRP_COLS.copy()
+    join_cols.remove('series')
+
+    driver_df = (
+            driver_df
+            .withColumn('feature_col', concat_ws("__", col('Indicator'),col('Lag')))
+            .drop('max_corr','Indicator','Lag')
+        )
+
+    joined_shap = driver_df.join(
+        shap_long_df,
+        join_cols+['feature_col'],
+        'inner'
+    )
+
+    return joined_shap
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+## Processing the SHAP output
+if 'rec_lag' in selected_drivers.columns:
+    selected_drivers = selected_drivers.drop('rec_lag')
+shap_forecast_final = shap_prep(shap_forecast, selected_drivers)
+shap_training_final = shap_prep(shap_training, selected_drivers)
+
+display(shap_forecast_final)
+display(shap_training_final)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+## Writing SHAP OUTPUTS
+shap_forecast.write.mode('overwrite').parquet(XGB_SHAP_forecast_dir)
+shap_training.write.mode('overwrite').parquet(XGB_SHAP_training_dir)
 
 # METADATA ********************
 
@@ -808,6 +964,8 @@ if rerun_historical_forecasts:
     output.write.mode('overwrite').parquet(XGB_dir)
 else:
     output.write.mode('append').parquet(XGB_dir)
+
+
 
 # METADATA ********************
 
