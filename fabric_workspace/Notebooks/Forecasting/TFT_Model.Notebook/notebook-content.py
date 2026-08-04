@@ -49,10 +49,7 @@ from pytorch_forecasting import TimeSeriesDataSet
 
 from optuna.integration import PyTorchLightningPruningCallback
 
-# import pytorch_lightning as pl
-# from pytorch_lightning.callbacks import EarlyStopping
 
-## old imports when using the pip install commented out above:
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import EarlyStopping
 from pytorch_forecasting.data import GroupNormalizer
@@ -65,7 +62,46 @@ from pytorch_forecasting.data import GroupNormalizer
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# PARAMETERS CELL ********************
+
+## default parameters / parameters to pass in from the pipeline
+run_tft = True
+Topline = True
+rerun_historical_forecasts = False
+driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # CELL ********************
+
+print(f"run_tft: {run_tft}")
+print(f"Topline: {Topline}")
+print(f"rerun_historical_forecasts: {rerun_historical_forecasts}")
+print(f"driver_status: {driver_status}")
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+VALID_DRIVER_STATUS = ["No_Drivers", "Manual_Drivers", "Automated_Drivers"]
+if driver_status not in VALID_DRIVER_STATUS:
+    raise ValueError(
+        f"Invalid driver_status={driver_status}. "
+        f"Expected one of {VALID_DRIVER_STATUS}"
+    )
+
+
 
 # ==========================================================
 # CONFIG
@@ -73,9 +109,7 @@ from pytorch_forecasting.data import GroupNormalizer
 manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
 automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-Topline = False
-rerun_historical_forecasts = False
-driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+
 if Topline:
     actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
     initial_target_col = "Quantity"
@@ -86,7 +120,10 @@ if Topline:
     else:
         selected_driver_dir = automated_features + "Topline/topline_xgboost_selected_feature.xlsx"
     parquet_dir = parquet_dir + "/Topline/" + driver_status + "/"
-    TFT_dir = parquet_dir + "TFT_Output.parquet"
+    TFT_forcast_dir = parquet_dir + "TFT_Forecast_Output.parquet"
+    TFT_static_dir = parquet_dir + "TFT_static_Output.parquet"
+    TFT_decoder_dir = parquet_dir + "TFT_decoder_Output.parquet"
+    TFT_attention_dir = parquet_dir + "TFT_attention_Output.parquet"
 else:
     actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
     initial_target_col = 'Quantity'
@@ -97,7 +134,11 @@ else:
     else:
         selected_driver_dir = automated_features + "Middle/middle_xgboost_selected_features.xlsx"
     parquet_dir = parquet_dir + "/Middle/" + driver_status + "/"
-    TFT_dir = parquet_dir + "TFT_Output.parquet"
+    TFT_forcast_dir = parquet_dir + "TFT_Forecast_Output.parquet"
+    TFT_static_dir = parquet_dir + "TFT_static_Output.parquet"
+    TFT_decoder_dir = parquet_dir + "TFT_decoder_Output.parquet"
+    TFT_attention_dir = parquet_dir + "TFT_attention_Output.parquet"
+
 FORECAST_HORIZON = 18
 SEASONAL_PERIODS = 12
 MIN_TRAIN = 36
@@ -105,7 +146,7 @@ MIN_TRAIN = 36
 
                
 TUNE_HOLDOUT_MONTHS = FORECAST_HORIZON
-N_OPTUNA_TRIALS =  2 #10 temp placement just for testing/verification
+N_OPTUNA_TRIALS =  50
 OPTUNA_SEED = 42
 ENCODER_LENGTH = 36
 
@@ -340,12 +381,13 @@ def default_tft_params():
 # Objective
 ############################################################
 def objective(trial, train_dataset, validation_dataset):
+    pl.seed_everything(OPTUNA_SEED)
     print("Another trail/objective has been run")
 
     early_stop_callback = EarlyStopping(
         monitor="val_loss",
         min_delta=1e-3,
-        patience=5,
+        patience=10,
         mode="min",
     )
 
@@ -430,6 +472,10 @@ def objective(trial, train_dataset, validation_dataset):
     # DataLoaders
     ########################################################
     print("creating train and val data loaders")
+    print("Train samples:", len(train_dataset))
+    print("Validation samples:", len(validation_dataset))
+
+
     train_loader = train_dataset.to_dataloader(
         train=True,
         batch_size=params["batch_size"],
@@ -457,6 +503,7 @@ def objective(trial, train_dataset, validation_dataset):
         hidden_continuous_size=params["hidden_continuous_size"],
         dropout=params["dropout"],
         loss=QuantileLoss(),
+        log_interval=10,
     )
 
     ########################################################
@@ -470,7 +517,7 @@ def objective(trial, train_dataset, validation_dataset):
         accelerator="cpu",
         devices=1,
         max_epochs= 50, #15,
-        limit_train_batches=0.8,
+        limit_train_batches=1.0,
         gradient_clip_val=params["gradient_clip_val"],
         logger=False,
         enable_checkpointing=False,
@@ -510,6 +557,13 @@ def objective(trial, train_dataset, validation_dataset):
 
     # print('returning the score of the trail/run')
     # print(f'score was {score}')
+
+    # score = trainer.callback_metrics["val_loss"].item()
+
+    if "val_loss" not in trainer.callback_metrics:
+        raise RuntimeError(
+            f"Validation loss missing. Metrics available: {trainer.callback_metrics}"
+        )
 
     score = trainer.callback_metrics["val_loss"].item()
 
@@ -562,20 +616,10 @@ def tune_tft_hyperparameters(
 
 
     validation_df = training_df[
-        training_df.time_idx >= cutoff - encoder_length + 1
+        training_df.time_idx > cutoff - encoder_length
     ]
 
-    train_df[target] = (
-        train_df[target]
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0)
-    )
 
-    validation_df[target] = (
-        validation_df[target]
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0)
-    )
 
     print(f'split with cutoff date of: {cutoff}')
 
@@ -619,8 +663,8 @@ def tune_tft_hyperparameters(
         direction="minimize",
         sampler=optuna.samplers.TPESampler(seed=seed),
         pruner=optuna.pruners.MedianPruner(
-            n_startup_trials=3,
-            n_warmup_steps=5,
+            n_startup_trials=5,
+            n_warmup_steps=10,
         ),
     )
     print('beginning the optuna study')
@@ -683,6 +727,7 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
     trainer = pl.Trainer(
         max_epochs=50,
         gradient_clip_val=best_params["gradient_clip_val"],
+        enable_checkpointing=True,
         enable_progress_bar=False        
     )
 
@@ -1216,17 +1261,6 @@ def fit_TFT_global(sdf):
 
 # CELL ********************
 
-run_tft = True
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 if run_tft:
     print(f"Topline status: {Topline}")
     print(driver_status)
@@ -1238,6 +1272,34 @@ if run_tft:
     static_importance.cache()
     decoder_importance.cache()
     attention.cache()
+
+    forecasts = forecasts.withColumnRenamed('prediction','Forecast')
+    static_importance = static_importance.withColumnRenamed('variable','feature')
+    decoder_importance = decoder_importance.withColumnRenamed('variable','feature')
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+if run_tft:
+    if rerun_historical_forecasts:
+        print(f"overwriting parquet with new historical forecast values: {TFT_forcast_dir}")
+        forecasts.write.mode('overwrite').parquet(TFT_forcast_dir)
+        static_importance.write.mode('overwrite').parquet(TFT_static_dir)
+        decoder_importance.write.mode('overwrite').parquet(TFT_decoder_dir)
+        attention.write.mode('overwrite').parquet(TFT_attention_dir)
+    else:
+        print(f"appending new forecast values to the existing parquet {TFT_forcast_dir}")
+        forecasts.write.mode('overwrite').parquet(TFT_forcast_dir)
+        static_importance.write.mode('overwrite').parquet(TFT_static_dir)
+        decoder_importance.write.mode('overwrite').parquet(TFT_decoder_dir)
+        attention.write.mode('overwrite').parquet(TFT_attention_dir)
 
 # METADATA ********************
 
