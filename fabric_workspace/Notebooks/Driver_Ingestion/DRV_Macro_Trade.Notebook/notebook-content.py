@@ -160,17 +160,6 @@ df_unpivot = df_unpivot[
 
 # CELL ********************
 
-df_unpivot.head()
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 # df_world = df_unpivot.groupby(["Indicator", "Currency", "Unit", "Date"], as_index=False)["Value"].sum()
 # df_world["Country"] = "World"
 

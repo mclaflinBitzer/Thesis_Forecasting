@@ -5,118 +5,23 @@
       "enabled": true,
       "jobType": "Execute",
       "configuration": {
-        "type": "Daily",
-        "startDateTime": "2026-07-29T00:00:00",
-        "endDateTime": "2027-07-29T00:00:00",
+        "type": "Monthly",
+        "startDateTime": "2026-07-31T00:00:00",
+        "endDateTime": "2027-07-31T00:00:00",
         "localTimeZoneId": "Romance Standard Time",
         "times": [
-          "23:30"
-        ]
-      },
-      "parameters": [
-        {
-          "name": "Topline",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "rerun_historical_forecasts",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "ets_run",
-          "value": false,
-          "type": "Boolean"
-        },
-        {
-          "name": "arimax_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "sarimax_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "prophet_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "driver_stats",
-          "value": "Manual_Drivers",
-          "type": "Text"
+          "10:25"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 31
         }
-      ]
-    },
-    {
-      "enabled": true,
-      "jobType": "Execute",
-      "configuration": {
-        "type": "Daily",
-        "startDateTime": "2026-07-29T00:00:00",
-        "endDateTime": "2027-07-29T00:00:00",
-        "localTimeZoneId": "Romance Standard Time",
-        "times": [
-          "01:30"
-        ]
       },
       "parameters": [
         {
           "name": "Topline",
           "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "rerun_historical_forecasts",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "ets_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "arimax_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "sarimax_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "prophet_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "driver_status",
-          "value": "Automated_Drivers",
-          "type": "Text"
-        }
-      ]
-    },
-    {
-      "enabled": true,
-      "jobType": "Execute",
-      "configuration": {
-        "type": "Daily",
-        "startDateTime": "2026-07-29T00:00:00",
-        "endDateTime": "2027-07-29T00:00:00",
-        "localTimeZoneId": "Romance Standard Time",
-        "times": [
-          "03:30"
-        ]
-      },
-      "parameters": [
-        {
-          "name": "Topline",
-          "value": false,
           "type": "Boolean"
         },
         {
@@ -147,56 +52,6 @@
         {
           "name": "driver_status",
           "value": "Manual_Drivers",
-          "type": "Text"
-        }
-      ]
-    },
-    {
-      "enabled": true,
-      "jobType": "Execute",
-      "configuration": {
-        "type": "Daily",
-        "startDateTime": "2026-07-29T00:00:00",
-        "endDateTime": "2027-07-29T00:00:00",
-        "localTimeZoneId": "Romance Standard Time",
-        "times": [
-          "05:30"
-        ]
-      },
-      "parameters": [
-        {
-          "name": "Topline",
-          "value": false,
-          "type": "Boolean"
-        },
-        {
-          "name": "rerun_historical_forecasts",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "ets_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "arimax_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "sarimax_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "prophet_run",
-          "value": true,
-          "type": "Boolean"
-        },
-        {
-          "name": "driver_status",
-          "value": "Automated_Drivers",
           "type": "Text"
         }
       ]

@@ -37,11 +37,23 @@
 
 # PARAMETERS CELL ********************
 
-## Parameters that I want the ability to override from the Pipeline during execution
+# Parameters
 Topline = True
 rerun_historical_forecasts = False
-driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+driver_status = "No_Drivers"
 
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print(Topline)
+print(rerun_historical_forecasts)
+print(driver_status)
 
 # METADATA ********************
 
@@ -139,9 +151,14 @@ if driver_status == "No_Drivers":
 else:
     drivers_used = True
 
+# METADATA ********************
 
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
-
+# CELL ********************
 
 ### Reading Data
 actuals = (
@@ -149,7 +166,16 @@ actuals = (
     .withColumnRenamed(initial_target_col, target_col)
 )
 
+print(f"read actuals from table: {actuals_table}")
 
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
 
 def add_future_months(df, ACT_GRP_COLS, date_col='Date', horizon=18):
     """
@@ -180,8 +206,16 @@ def add_future_months(df, ACT_GRP_COLS, date_col='Date', horizon=18):
 
 
 actuals_fh_populated = add_future_months(actuals, ACT_GRP_COLS)
+print("added future forecast horizon records")
 
+# METADATA ********************
 
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
 
 if drivers_used:
     compiled_drivers = spark.read.table(driver_table)
@@ -258,11 +292,14 @@ if drivers_used:
     actuals_fh_populated = actuals_w_drivers
     print('actuals_fh_populated dataframe is now overwritten with a dataframe containing driver data in long format')
 
+# METADATA ********************
 
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
-
-
-
+# CELL ********************
 
 ## Data Transformations / Processing
 def pivot_long_to_wide(sdf):
@@ -928,14 +965,15 @@ def shap_prep(shap_df, driver_df):
 
 # CELL ********************
 
-## Processing the SHAP output
-if 'rec_lag' in selected_drivers.columns:
-    selected_drivers = selected_drivers.drop('rec_lag')
-shap_forecast_final = shap_prep(shap_forecast, selected_drivers)
-shap_training_final = shap_prep(shap_training, selected_drivers)
+if drivers_used:
+    ## Processing the SHAP output
+    if 'rec_lag' in selected_drivers.columns:
+        selected_drivers = selected_drivers.drop('rec_lag')
+    shap_forecast_final = shap_prep(shap_forecast, selected_drivers)
+    shap_training_final = shap_prep(shap_training, selected_drivers)
 
-display(shap_forecast_final)
-display(shap_training_final)
+    display(shap_forecast_final)
+    display(shap_training_final)
 
 # METADATA ********************
 
@@ -948,7 +986,10 @@ display(shap_training_final)
 
 
 ## Writing SHAP OUTPUTS
+print(f"writing xgb shap forecast values to {XGB_SHAP_forecast_dir}")
 shap_forecast.write.mode('overwrite').parquet(XGB_SHAP_forecast_dir)
+
+print(f"writing xgb shap training values to {XGB_SHAP_training_dir}")
 shap_training.write.mode('overwrite').parquet(XGB_SHAP_training_dir)
 
 # METADATA ********************
@@ -961,8 +1002,10 @@ shap_training.write.mode('overwrite').parquet(XGB_SHAP_training_dir)
 # CELL ********************
 
 if rerun_historical_forecasts:
+    print(f"overwriting parquet with new historical forecast values: {XGB_dir}")
     output.write.mode('overwrite').parquet(XGB_dir)
 else:
+    print(f"appending new forecast values to the existing parquet {XGB_dir}")
     output.write.mode('append').parquet(XGB_dir)
 
 
@@ -976,35 +1019,35 @@ else:
 
 # CELL ********************
 
-dist_prod_cat = (
-    output.select("Product_Category")
-          .distinct()
-          .rdd.flatMap(lambda x: x)
-          .collect()
-)
+# dist_prod_cat = (
+#     output.select("Product_Category")
+#           .distinct()
+#           .rdd.flatMap(lambda x: x)
+#           .collect()
+# )
 
-temp = spark.read.table(actuals_table)
-
-
-test = output
-#spark.read.parquet(Prophet_dir).cache()
-
-test_agg = test.groupBy(*ACT_GRP_COLS, 'Date').agg(avg('Forecast').alias('Forecast'))
+# temp = spark.read.table(actuals_table)
 
 
-test_join = (
-    temp.withColumnRenamed('Quantity','Value').withColumn('series', concat_ws("__", col('series'), lit('ACT')))
-    .unionByName(
-        test_agg.withColumnRenamed('Forecast','Value').withColumn('series', concat_ws("__", col('series'), lit('FORCAST')))
-    )
-)
+# test = output
+# #spark.read.parquet(Prophet_dir).cache()
 
-if Topline:
-    display(test_join)
-else:
-    for prod_catg in dist_prod_cat:
-        print(f"Visualization for all {prod_catg} and region combinations")
-        display(test_join.filter(col('series').like(f"{prod_catg}%")))
+# test_agg = test.groupBy(*ACT_GRP_COLS, 'Date').agg(avg('Forecast').alias('Forecast'))
+
+
+# test_join = (
+#     temp.withColumnRenamed('Quantity','Value').withColumn('series', concat_ws("__", col('series'), lit('ACT')))
+#     .unionByName(
+#         test_agg.withColumnRenamed('Forecast','Value').withColumn('series', concat_ws("__", col('series'), lit('FORCAST')))
+#     )
+# )
+
+# if Topline:
+#     display(test_join)
+# else:
+#     for prod_catg in dist_prod_cat:
+#         print(f"Visualization for all {prod_catg} and region combinations")
+#         display(test_join.filter(col('series').like(f"{prod_catg}%")))
 
 # METADATA ********************
 

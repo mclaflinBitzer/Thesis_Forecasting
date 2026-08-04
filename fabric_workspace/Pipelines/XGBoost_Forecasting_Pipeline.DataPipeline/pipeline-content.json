@@ -5,7 +5,30 @@
         "type": "TridentNotebook",
         "typeProperties": {
           "notebookId": "e9194f25-b5bb-9bfc-43f8-3916644baab0",
-          "workspaceId": "00000000-0000-0000-0000-000000000000"
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "Topline": {
+              "value": {
+                "value": "@pipeline().parameters.Topline",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "rerun_historical_forecasts": {
+              "value": {
+                "value": "@pipeline().parameters.rerun_historical_forecasts",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "driver_status": {
+              "value": {
+                "value": "@pipeline().parameters.driver_status",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
         },
         "policy": {
           "timeout": "0.12:00:00",

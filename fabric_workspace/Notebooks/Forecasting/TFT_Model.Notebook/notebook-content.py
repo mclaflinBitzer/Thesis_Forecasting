@@ -26,30 +26,10 @@
 
 # CELL ********************
 
-# %pip install lightning
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# %pip install pytorch_forecasting
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 # Welcome to your new notebook
 import numpy as np
+from dateutil.relativedelta import relativedelta
+import math
 from pyspark.sql import DataFrame, functions as F, Window
 from pyspark.ml.feature import StringIndexer, VectorAssembler
 import xgboost as xgb
@@ -75,6 +55,8 @@ from optuna.integration import PyTorchLightningPruningCallback
 ## old imports when using the pip install commented out above:
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import EarlyStopping
+from pytorch_forecasting.data import GroupNormalizer
+
 
 # METADATA ********************
 
@@ -91,7 +73,7 @@ from lightning.pytorch.callbacks import EarlyStopping
 manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
 automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
 parquet_dir = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting"
-Topline = True
+Topline = False
 rerun_historical_forecasts = False
 driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 if Topline:
@@ -119,9 +101,7 @@ else:
 FORECAST_HORIZON = 18
 SEASONAL_PERIODS = 12
 MIN_TRAIN = 36
-STEP_SIZE = 3  # controls how many full model retrainings happen in the
-               # walk-forward backtest below. Increase if too slow —
-               # does not affect the always-on future forecast.
+#STEP_SIZE = 3  # is dynamically set to only do 6 historical forecasting run to avoid long runtimes
 
                
 TUNE_HOLDOUT_MONTHS = FORECAST_HORIZON
@@ -151,6 +131,7 @@ actuals = (
     spark.read.table(actuals_table)
     .withColumnRenamed(initial_target_col, target_col)
     .fillna(0.0,subset='Value')
+    .withColumn(target_col, greatest(col(target_col),lit(0)))
 )
 
 # METADATA ********************
@@ -363,7 +344,7 @@ def objective(trial, train_dataset, validation_dataset):
 
     early_stop_callback = EarlyStopping(
         monitor="val_loss",
-        min_delta=1e-4,
+        min_delta=1e-3,
         patience=5,
         mode="min",
     )
@@ -488,7 +469,7 @@ def objective(trial, train_dataset, validation_dataset):
     trainer = pl.Trainer(
         accelerator="cpu",
         devices=1,
-        max_epochs=15,
+        max_epochs= 50, #15,
         limit_train_batches=0.8,
         gradient_clip_val=params["gradient_clip_val"],
         logger=False,
@@ -511,8 +492,8 @@ def objective(trial, train_dataset, validation_dataset):
     print("fitting the model")
     trainer.fit(
         model,
-        train_loader,
-        val_loader,
+        train_dataloaders=train_loader,
+        val_dataloaders=val_loader,
     )
 
     ########################################################
@@ -521,14 +502,20 @@ def objective(trial, train_dataset, validation_dataset):
     ## how well did this trained model perform on unseen data?
     ########################################################
     print("Beginning model evaluation")
-    score = trainer.validate(
-        model,
-        val_loader,
-        verbose=False,
-    )[0]["val_loss"]
+    # score = trainer.validate(
+    #     model,
+    #     val_loader,
+    #     verbose=False,
+    # )[0]["val_loss"]
 
-    print('returning the score of the trail/run')
-    print(f'score was {score}')
+    # print('returning the score of the trail/run')
+    # print(f'score was {score}')
+
+    score = trainer.callback_metrics["val_loss"].item()
+
+    print("Returning validation loss")
+    print(f"score was {score}")
+
     print('END OF TRIAL')
     print("="*80)
     return score
@@ -568,10 +555,28 @@ def tune_tft_hyperparameters(
     ## cutoff date is set by max date - the prediction length (Forecast Horizon)
     max_idx = training_df.time_idx.max()
     cutoff = max_idx - prediction_length
+
     train_df = training_df[
         training_df.time_idx <= cutoff
     ]
-    validation_df = training_df[training_df.time_idx > cutoff-encoder_length]
+
+
+    validation_df = training_df[
+        training_df.time_idx >= cutoff - encoder_length + 1
+    ]
+
+    train_df[target] = (
+        train_df[target]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0)
+    )
+
+    validation_df[target] = (
+        validation_df[target]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0)
+    )
+
     print(f'split with cutoff date of: {cutoff}')
 
 
@@ -589,6 +594,10 @@ def tune_tft_hyperparameters(
         static_categoricals=static_categoricals,
         time_varying_known_reals=time_varying_known_reals,
         time_varying_unknown_reals=time_varying_unknown_reals,
+        target_normalizer=GroupNormalizer(
+            groups=group_ids,
+            transformation="softplus",
+        ),
         allow_missing_timesteps=True,
     )
 
@@ -636,6 +645,336 @@ def tune_tft_hyperparameters(
 
 # CELL ********************
 
+def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_reals):
+
+    ## Creating the training dataset
+    train_dataset = TimeSeriesDataSet(
+        hist_df,
+        time_idx='time_idx',
+        target=target_col,
+        group_ids=ACT_GRP_COLS,
+        max_encoder_length=ENCODER_LENGTH,
+        max_prediction_length=FORECAST_HORIZON,
+        static_categoricals=ACT_GRP_COLS,
+        time_varying_known_reals=time_varying_known_reals,
+        time_varying_unknown_reals=[target_col],
+        target_normalizer=GroupNormalizer(
+            groups=ACT_GRP_COLS,
+            transformation="softplus",
+        ),
+        allow_missing_timesteps=True,
+    )
+
+    train_loader = train_dataset.to_dataloader(
+        train=True,
+        batch_size = best_params['batch_size']
+    )
+
+    model = TemporalFusionTransformer.from_dataset(
+        train_dataset,
+        learning_rate = best_params["learning_rate"],
+        hidden_size=best_params["hidden_size"],
+        attention_head_size=best_params["attention_head_size"],
+        hidden_continuous_size=best_params["hidden_continuous_size"],
+        dropout=best_params["dropout"],
+        loss=QuantileLoss(),
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=50,
+        gradient_clip_val=best_params["gradient_clip_val"],
+        enable_progress_bar=False        
+    )
+
+    trainer.fit(
+        model,
+        train_loader,
+    )
+
+
+    ## Creating Future DataSet / Predictions
+    future_dataset = TimeSeriesDataSet.from_dataset(
+        train_dataset,
+        forecast_df,
+        predict=True,
+        stop_randomization=True,
+    )
+
+    future_loader = future_dataset.to_dataloader(
+        train=False,
+        batch_size=best_params['batch_size'],
+    )
+
+    raw_predictions= model.predict(
+        future_loader,
+        mode="raw",
+        return_x=True,
+        return_index=True
+    )
+
+
+
+    ## point forecasts
+    point_predictions = model.to_prediction(raw_predictions.output)
+    point_predictions = point_predictions.detach().cpu().numpy()
+
+
+    # Index describing each prediction
+    prediction_index = raw_predictions.index.reset_index(drop=True)
+
+    # -------------------------------
+    # Flatten point forecasts
+    # -------------------------------
+
+    forecasted_rows = []
+
+    for i, row in prediction_index.iterrows():
+        for h in range(point_predictions.shape[1]):
+            forecasted_rows.append({
+                **row.to_dict(),
+                "forecast_horizon": h + 1,
+                "prediction": point_predictions[i, h]
+            })
+
+    forecasted_df = spark.createDataFrame(pd.DataFrame(forecasted_rows))
+
+    org_forecast_df = spark.createDataFrame(forecast_df)
+
+    joined_forecasted_df = (
+        forecasted_df.withColumn('time_idx', col('time_idx')-1)
+        .join(
+            broadcast(org_forecast_df.select('Date','time_idx').distinct()),
+            'time_idx',
+            'inner'
+        )
+    )
+
+    joined_forecasted_df = (
+        joined_forecasted_df
+        .withColumn('End_Training_Date', col('Date'))
+        .withColumn('Date', add_months(col('Date'),col('forecast_horizon')))
+        .withColumn("Forecaster", lit("TFT_Global"))
+        .withColumn("Drivers_Used_Flag", lit(driver_status))
+        .drop('time_idx')
+    )
+
+
+
+    prediction_index = (
+        prediction_index
+        .assign(time_idx=lambda x: x["time_idx"] - 1)
+        .merge(
+            forecast_df[
+                ACT_GRP_COLS + ["time_idx", "Date"]
+            ].drop_duplicates(),
+            on=ACT_GRP_COLS + ["time_idx"],
+            how="left"
+        )
+        .rename(
+            columns={
+                "Date": "End_Training_Date"
+            }
+        )
+    )
+
+    prediction_index['time_idx'] = prediction_index['time_idx']+1
+
+
+
+    # ------------------------------------------------------------
+    # STATIC VARIABLE IMPORTANCE
+    # Shape:
+    # [batch_size, number_static_variables]
+    # ------------------------------------------------------------
+    # ------------------------------------------------------------
+    # STATIC VARIABLE IMPORTANCE
+    # ------------------------------------------------------------
+
+    static_values = (
+        raw_predictions.output["static_variables"]
+        .detach()
+        .cpu()
+        .numpy()
+    )
+
+
+    # Remove singleton dimension only
+    if static_values.ndim == 3 and static_values.shape[1] == 1:
+        static_values = static_values.squeeze(axis=1)
+
+    if static_values.ndim == 1:
+        static_values = static_values.reshape(1, -1)
+
+    static_variables = future_dataset.static_categoricals
+
+
+    static_rows = []
+
+    for i, row in prediction_index.iterrows():
+
+        for v, variable in enumerate(static_variables):
+
+            static_rows.append(
+                {
+                    **row.to_dict(),
+                    "variable": variable,
+                    "importance": float(static_values[i,v])
+                }
+            )
+
+
+    static_importance_df = spark.createDataFrame(
+        pd.DataFrame(static_rows)
+    )
+
+    static_importance_df = static_importance_df.drop('time_idx')
+
+
+
+
+
+    # ------------------------------------------------------------
+    # DECODER VARIABLE IMPORTANCE
+    # ------------------------------------------------------------
+
+    decoder_values = (
+        raw_predictions.output["decoder_variables"]
+        .detach()
+        .cpu()
+        .numpy()
+    )
+
+
+
+    # remove target dimension
+    if decoder_values.ndim == 4 and decoder_values.shape[2] == 1:
+        decoder_values = decoder_values.squeeze(axis=2)
+
+
+    decoder_variables = future_dataset.time_varying_known_reals
+
+
+
+
+    decoder_rows = []
+
+    assert decoder_values.shape[-1] == len(decoder_variables)
+    for i, row in prediction_index.iterrows():
+
+        for h in range(decoder_values.shape[1]):
+
+            for v, variable in enumerate(decoder_variables):
+
+                decoder_rows.append(
+                    {
+                        **row.to_dict(),
+                        "forecast_horizon": h + 1,
+                        "variable": variable,
+                        "importance": float(
+                            decoder_values[i,h,v]
+                        )
+                    }
+                )
+
+
+    decoder_importance_df = pd.DataFrame(decoder_rows)
+
+
+    decoder_importance_df["importance_pct"] = (
+        decoder_importance_df
+        .groupby(
+            [
+                *ACT_GRP_COLS,
+                "End_Training_Date",
+                "forecast_horizon"
+            ]
+        )["importance"]
+        .transform(
+            lambda x:
+            x / x.sum()
+            if x.sum() != 0
+            else 0
+        )
+    )
+
+
+    decoder_importance_df = spark.createDataFrame(
+        decoder_importance_df
+    )
+    decoder_importance_df = decoder_importance_df.drop('time_idx')
+
+
+    # ------------------------------------------------------------
+    # ATTENTION WEIGHTS
+    # Shows which historical periods drove each forecast horizon
+    # ------------------------------------------------------------
+
+    attention_values = (
+        raw_predictions.output["decoder_attention"]
+        .detach()
+        .cpu()
+        .numpy()
+    )
+
+    print("raw attention shape:", attention_values.shape)
+
+
+    # Remove attention head dimension
+    # (batch, heads, horizon, encoder_length)
+    # ->
+    # (batch, horizon, encoder_length)
+
+    if attention_values.ndim == 4:
+        attention_values = attention_values.mean(axis=2)
+
+
+    print("processed attention shape:", attention_values.shape)
+
+    attention_rows = []
+
+    for i, row in prediction_index.iterrows():
+
+        for h in range(attention_values.shape[1]):
+
+            for lag in range(attention_values.shape[2]):
+
+                attention_rows.append(
+                    {
+                        **row.to_dict(),
+                        "forecast_horizon": h + 1,
+                        "encoder_lag": lag + 1,
+                        "attention_weight": float(
+                            attention_values[i,h,lag]
+                        )
+                    }
+                )
+
+
+    attention_df = spark.createDataFrame(
+        pd.DataFrame(attention_rows)
+    )
+    attention_df = attention_df.drop('time_idx')
+
+
+
+    return (
+        joined_forecasted_df,
+        static_importance_df,
+        decoder_importance_df,
+        attention_df
+    )
+
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 ## Main Orchestration
 
@@ -660,6 +999,7 @@ def fit_TFT_global(sdf):
     ### REPLACING "." WITH "____" IN ORDER TO HAVE THE COLUMN NAMES WORK WITH TFT
     sdf = sdf.toDF(*[c.replace(".", "____") for c in sdf.columns])
 
+
     excluded_cols = ACT_GRP_COLS + ['Date',target_col]
     driver_cols = [c for c in sdf.columns if c not in excluded_cols]
 
@@ -671,19 +1011,23 @@ def fit_TFT_global(sdf):
         'time_idx', 
         months_between(col('Date'), lit(min_date)).cast('int'))
 
-    display(sdf.orderBy(desc('Date')))
-
+    ## setting final training dataframes for initial hyperparameter tuning & final forecasting
     training_df = sdf.filter(col(target_col).isNotNull())
     training_df = training_df.fillna(0.0, subset=driver_cols)
-    display(training_df.orderBy(desc('Date')))
-
-    training_df = training_df.toPandas()
+    training_df = training_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
 
     time_varying_known_reals = driver_cols + calendar_cols
     time_varying_known_reals.remove("_dt")
 
-    sdf=sdf.toPandas()
+    ## need to also fill the target_col with 0 prior to ingestion for predictions as NaN/Nulls are not allowed
+    full_df = sdf.fillna(0.0, subset=driver_cols)
+    full_df = full_df.fillna(0.0, subset=target_col)
+    full_df = full_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
 
+
+
+    print("BEGINNING TFT HYPERPARAMETER TUNING")
+    print("="*80)
 
 
     best_params = tune_tft_hyperparameters(
@@ -701,91 +1045,167 @@ def fit_TFT_global(sdf):
     )
 
 
-    full_dataset = TimeSeriesDataSet(
-        training_df,
-        time_idx="time_idx",
-        target=target_col,
-        group_ids=ACT_GRP_COLS,
-        max_encoder_length=ENCODER_LENGTH,
-        max_prediction_length=FORECAST_HORIZON,
-        static_categoricals=ACT_GRP_COLS,
-        time_varying_known_reals=time_varying_known_reals,
-        time_varying_unknown_reals=[target_col],
-        allow_missing_timesteps=True,
+    ### leverage run_tft_forecasts for downstream code
+
+    all_forecasts = []
+    all_static_importance = []
+    all_decoder_importance = []
+    all_attention = []
+
+
+
+
+
+    ## HISTORICAL FORECASTING
+
+    sdf.cache()
+
+    if rerun_historical_forecasts:
+        first_date = (
+            sdf
+            .filter(col(target_col).isNotNull())
+            .groupBy(ACT_GRP_COLS)
+            .agg(
+                min('Date').alias('min_date')
+            )
+            .withColumn(
+                'date_options',
+                add_months(col('min_date'), ENCODER_LENGTH)
+            )
+            .agg(
+                max(col('date_options')).alias('first_date')
+                ).collect()[0]['first_date']
+        )
+        max_elig_date = (
+            sdf
+            .filter(col(target_col).isNotNull())
+            .agg(
+                max('Date').alias('max_date')
+            )
+            .withColumn('max_date',add_months(col('max_date'),-1)) ## to ensure that the most recent date is not used for historical forecasts
+            .collect()[0]['max_date']
+        )
+
+        eligible_dates = (
+            sdf
+            .filter(
+                (col('Date')>=first_date) &
+                (col('Date')<=max_elig_date)
+            )
+            .select('Date').distinct()
+        )
+
+        print(first_date)
+        print(max_elig_date)
+        
+        ## ensures that a max of 6 historical forecasts are done
+        step_size = math.ceil(eligible_dates.count()/6)
+
+        print(f"the step size as been set to {step_size}")
+
+        ## generating origin dates in range using the step size
+        origin_dates = [
+            r['Date'] for r in 
+            eligible_dates.orderBy('Date').collect()
+        ][::step_size]
+
+        if ((origin_dates[1].year - origin_dates[0].year) * 12 + (origin_dates[1].month - origin_dates[0].month))>18:
+            raise ValueError("The step size is larger than 18, due to this a historical rerun will not cover all months with forecast values")
+        else:
+            print('the step size is small enough to ensure coverage')
+
+
+        ## iterating through the origin dates for historical forecasting
+        for origin_date in origin_dates:
+            
+            hist_df = sdf.filter(col('Date')<=origin_date)
+
+            forecast_end = origin_date + relativedelta(months=18)
+
+            forecast_df = (
+                sdf
+                .filter(
+                    (col('Date')<=forecast_end)
+                )
+                .withColumn(target_col, lit(0.0).cast('double'))
+            )
+
+
+            hist_df = hist_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
+            forecast_df = forecast_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
+
+            
+            joined_forecasted_df, static_importance_df, decoder_importance_df, attention_df = run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_reals)
+
+
+            all_forecasts.append(joined_forecasted_df)
+
+            all_static_importance.append(static_importance_df)
+
+            all_decoder_importance.append(decoder_importance_df)
+
+            all_attention.append(attention_df)
+
+
+
+
+
+
+    ## FUTURE FORECASTING
+
+
+    print("BEGINNING FINAL FORECASTING ITERATION FOR FUTURE FORECAST HORIZONS")
+    print("="*80)
+    joined_forecasted_df, static_importance_df, decoder_importance_df, attention_df = run_tft_forecasts(best_params, training_df, full_df, time_varying_known_reals)
+
+
+    all_forecasts.append(joined_forecasted_df)
+
+    all_static_importance.append(static_importance_df)
+
+    all_decoder_importance.append(decoder_importance_df)
+
+    all_attention.append(attention_df)
+
+
+
+    ## CREATION OF FINAL OUTPUT DATASETS
+
+
+    from functools import reduce
+
+
+    final_forecasts = reduce(
+        lambda df1, df2: df1.unionByName(df2),
+        all_forecasts
     )
 
-    train_loader = full_dataset.to_dataloader(
-        train=True,
-        batch_size=best_params["batch_size"],
+
+    final_static_importance = reduce(
+        lambda df1, df2: df1.unionByName(df2),
+        all_static_importance
     )
 
-    model = TemporalFusionTransformer.from_dataset(
-        full_dataset,
-        learning_rate=best_params["learning_rate"],
-        hidden_size=best_params["hidden_size"],
-        attention_head_size=best_params["attention_head_size"],
-        hidden_continuous_size=best_params["hidden_continuous_size"],
-        dropout=best_params["dropout"],
-        loss=QuantileLoss(),
+
+    final_decoder_importance = reduce(
+        lambda df1, df2: df1.unionByName(df2),
+        all_decoder_importance
     )
 
-    trainer = pl.Trainer(
-        max_epochs=50,
-        gradient_clip_val=best_params["gradient_clip_val"],
-        enable_progress_bar=False
+
+    final_attention = reduce(
+        lambda df1, df2: df1.unionByName(df2),
+        all_attention
     )
 
-    trainer.fit(
-        model,
-        train_loader,
+
+
+    return (
+        final_forecasts,
+        final_static_importance,
+        final_decoder_importance,
+        final_attention
     )
-
-    ## Creating Future DataSet / Predictions
-    future_dataset = TimeSeriesDataSet.from_dataset(
-        full_dataset,
-        sdf,
-        predict=True,
-        stop_randomization=True,
-    )
-
-    future_loader = future_dataset.to_dataloader(
-        train=False,
-        batch_size=best_params['batch_size'],
-    )
-
-    predictions = trainer.predict(
-        model,
-        future_loader,
-    )
-
-    ## CODE TO EXTRACT IMPORTANCE METRICS
-    interpretation = model.interpret_output(
-        predictions.output,
-        reduction="sum",
-    )
-
-    ## TFT does not produce static coefficients like classical models. it instead has dynamic importance 
-        # scores that change for every forecast, target series, month, and forecast horizon
-
-
-    ## THIS WILL CREATE 4 PLOTS
-        # Static Variable Importance (ACT_GRP_COLS)
-                # feature sthat never change within a series
-                # this would output the importance of each of the ACT_GRP_COLS for the specific forecast scenario 
-                # (ie the region was more important than product category)
-        # Encoder Variable Importance
-                # variables observed before the forecast begins and their weight
-                # provides the importance of the input variables (includes driver_cols as well as historical target_col)
-        # Decoder Variable Importance
-                # variables known in advance during forecasting (most likely use this metric)
-                # which future information mattered most when producing forecast values
-        # Attention Weights
-                # this explains which historical time periods mattered 
-                # attention is not about variables/drivers it is instead highlighting which historical time periods the model looked at
-                # ie period with the highest attention value means that the values from this historical period had the most influence on this particular forecast 
-    model.plot_interpretation(interpretation)
-
-    return predictions
 
 # METADATA ********************
 
@@ -796,116 +1216,7 @@ def fit_TFT_global(sdf):
 
 # CELL ********************
 
-sdf = actuals_fh_populated
-
-
-sdf = pivot_long_to_wide(sdf)
-### REPLACING "." WITH "____" IN ORDER TO HAVE THE COLUMN NAMES WORK WITH TFT
-sdf = sdf.toDF(*[c.replace(".", "____") for c in sdf.columns])
-
-excluded_cols = ACT_GRP_COLS + ['Date',target_col]
-driver_cols = [c for c in sdf.columns if c not in excluded_cols]
-
-sdf, calendar_cols = add_calendar_features(sdf)
-
-## creating time index column based on the Date column by *ACT_GRP_COLS
-min_date = sdf.agg(min("Date")).first()[0]
-sdf = sdf.withColumn(
-    'time_idx', 
-    months_between(col('Date'), lit(min_date)).cast('int'))
-
-display(sdf.orderBy(desc('Date')))
-
-training_df = sdf.filter(col(target_col).isNotNull())
-training_df = training_df.fillna(0.0, subset=driver_cols)
-display(training_df.orderBy(desc('Date')))
-
-training_df = training_df.toPandas()
-
-time_varying_known_reals = driver_cols + calendar_cols
-time_varying_known_reals.remove("_dt")
-
-
-sdf=sdf.fillna(0.0, subset=driver_cols)
-## need to also fill the target_col with 0 prior to ingestion for predictions as NaN/Nulls are not allowed
-sdf=sdf.fillna(0.0, subset=target_col)
-sdf=sdf.toPandas()
-
-
-print("BEGINNING TFT HYPERPARAMETER TUNING")
-print("="*80)
-
-best_params = tune_tft_hyperparameters(
-    training_df,
-    encoder_length=ENCODER_LENGTH,
-    prediction_length=FORECAST_HORIZON,
-    ## Column CLassification
-    static_categoricals=ACT_GRP_COLS,
-    time_varying_known_reals=time_varying_known_reals,
-    time_varying_unknown_reals=[target_col],
-    target=target_col,
-    group_ids=ACT_GRP_COLS,
-    n_trials=N_OPTUNA_TRIALS,
-    seed=OPTUNA_SEED
-)
-
-
-full_dataset = TimeSeriesDataSet(
-    training_df,
-    time_idx="time_idx",
-    target=target_col,
-    group_ids=ACT_GRP_COLS,
-    max_encoder_length=ENCODER_LENGTH,
-    max_prediction_length=FORECAST_HORIZON,
-    static_categoricals=ACT_GRP_COLS,
-    time_varying_known_reals=time_varying_known_reals,
-    time_varying_unknown_reals=[target_col],
-    allow_missing_timesteps=True,
-)
-
-train_loader = full_dataset.to_dataloader(
-    train=True,
-    batch_size=best_params["batch_size"],
-)
-
-model = TemporalFusionTransformer.from_dataset(
-    full_dataset,
-    learning_rate=best_params["learning_rate"],
-    hidden_size=best_params["hidden_size"],
-    attention_head_size=best_params["attention_head_size"],
-    hidden_continuous_size=best_params["hidden_continuous_size"],
-    dropout=best_params["dropout"],
-    loss=QuantileLoss(),
-)
-
-trainer = pl.Trainer(
-    max_epochs=50,
-    gradient_clip_val=best_params["gradient_clip_val"],
-    enable_progress_bar=False
-)
-
-trainer.fit(
-    model,
-    train_loader,
-)
-
-## Creating Future DataSet / Predictions
-future_dataset = TimeSeriesDataSet.from_dataset(
-    full_dataset,
-    sdf,
-    predict=True,
-    stop_randomization=True,
-)
-
-future_loader = future_dataset.to_dataloader(
-    train=False,
-    batch_size=best_params['batch_size'],
-)
-
-predictions = trainer.predict(
-    model,
-    future_loader,
-)
+run_tft = True
 
 # METADATA ********************
 
@@ -916,18 +1227,17 @@ predictions = trainer.predict(
 
 # CELL ********************
 
-future_check = sdf.copy()
-future_check.isna().sum().sort_values(ascending=False)
+if run_tft:
+    print(f"Topline status: {Topline}")
+    print(driver_status)
+    print(f"run_historical_forecasts: {rerun_historical_forecasts}")
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+    forecasts, static_importance, decoder_importance, attention = fit_TFT_global(actuals_fh_populated)
+    
+    forecasts.cache()
+    static_importance.cache()
+    decoder_importance.cache()
+    attention.cache()
 
 # METADATA ********************
 

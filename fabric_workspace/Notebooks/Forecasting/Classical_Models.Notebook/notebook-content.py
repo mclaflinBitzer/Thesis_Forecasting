@@ -100,7 +100,23 @@ ets_run = False
 arimax_run = True
 sarimax_run = True
 prophet_run = True
-driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print(Topline)
+print(ets_run)
+print(arimax_run)
+print(sarimax_run)
+print(prophet_run)
+print(driver_status)
 
 # METADATA ********************
 
@@ -902,30 +918,33 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
             except Exception:
                 continue
     if best_model is None:
-        return pd.DataFrame([])
+        return None
 
     forecast_result = best_model.get_forecast(steps=FORECAST_HORIZON, exog=exog_future)    
     forecast_mean = np.expm1(forecast_result.predicted_mean)
+    forecast_mean = forecast_mean.clip(lower=0)
     conf_int = np.expm1(forecast_result.conf_int(alpha=0.05))
 
 
-    ## Extracting the driver coefficients
-    params = best_model.params
-    driver_coefficients = {
-        driver: params.get(driver, np.nan)
-        for driver in driver_cols
-    }
+    driver_coefficients = None
+    driver_impacts = None
 
-    driver_impacts = []
-    for i in range(len(exog_future)):
-        impacts = {}
-        for driver in driver_cols:
+    if drivers_used:
+        params = best_model.params
+
+        driver_coefficients = {
+            driver: params.get(driver, np.nan)
+            for driver in driver_cols
+        }
+
+        driver_impacts = []
+
+        for i in range(len(exog_future)):
             impacts = {
                 driver: driver_coefficients[driver] * exog_future.iloc[i][driver]
                 for driver in driver_cols
             }
-
-        driver_impacts.append(impacts)
+            driver_impacts.append(impacts)
 
     out = pd.DataFrame({
         **{c: id_vals[c] for c in ACT_GRP_COLS},
@@ -938,11 +957,9 @@ def _sarimax_fit_and_forecast(train, future, driver_cols, drivers_used, id_vals,
         "Forecast_Lower": conf_int.iloc[:,0].values,
         "Forecast_Upper": conf_int.iloc[:,1].values,
             "Driver_STDDEV_Coefficients":
-                [driver_coefficients] * FORECAST_HORIZON
-                if drivers_used else [None] * FORECAST_HORIZON,
+                [driver_coefficients] * FORECAST_HORIZON,
             "Driver_Impacts":
-                driver_impacts
-                if drivers_used else [None] * FORECAST_HORIZON,
+                driver_impacts,
         "best_order": str(best_order),
         "aic": best_aic,
     })
