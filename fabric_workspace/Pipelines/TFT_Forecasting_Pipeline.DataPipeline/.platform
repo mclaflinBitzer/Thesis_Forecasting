@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "TFT_Forecasting_Pipeline"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "69c26057-5aa0-bee2-4af8-fd73df20019e"
+  }
+}

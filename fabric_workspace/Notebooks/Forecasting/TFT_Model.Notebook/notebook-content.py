@@ -66,9 +66,9 @@ from pytorch_forecasting.data import GroupNormalizer
 
 ## default parameters / parameters to pass in from the pipeline
 run_tft = True
-Topline = True
+Topline = False
 rerun_historical_forecasts = False
-driver_status = "Manual_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 
 # METADATA ********************
 
@@ -479,13 +479,13 @@ def objective(trial, train_dataset, validation_dataset):
     train_loader = train_dataset.to_dataloader(
         train=True,
         batch_size=params["batch_size"],
-        num_workers=10,
+        num_workers=0,
     )
 
     val_loader = validation_dataset.to_dataloader(
         train=False,
         batch_size=params["batch_size"],
-        num_workers=10,
+        num_workers=0,
     )
 
     ########################################################
@@ -748,6 +748,7 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
     future_loader = future_dataset.to_dataloader(
         train=False,
         batch_size=best_params['batch_size'],
+        num_workers=0
     )
 
     raw_predictions= model.predict(
@@ -1058,8 +1059,8 @@ def fit_TFT_global(sdf):
 
     ## setting final training dataframes for initial hyperparameter tuning & final forecasting
     training_df = sdf.filter(col(target_col).isNotNull())
-    training_df = training_df.fillna(0.0, subset=driver_cols)
     training_df = training_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
+    training_df[driver_cols] = training_df[driver_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     time_varying_known_reals = driver_cols + calendar_cols
     time_varying_known_reals.remove("_dt")
@@ -1068,6 +1069,7 @@ def fit_TFT_global(sdf):
     full_df = sdf.fillna(0.0, subset=driver_cols)
     full_df = full_df.fillna(0.0, subset=target_col)
     full_df = full_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
+    full_df[driver_cols] = full_df[driver_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
 
@@ -1178,6 +1180,8 @@ def fit_TFT_global(sdf):
 
             hist_df = hist_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
             forecast_df = forecast_df.orderBy(*ACT_GRP_COLS,'time_idx').toPandas()
+            hist_df[driver_cols] = hist_df[driver_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            forecast_df[driver_cols] = forecast_df[driver_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
             
             joined_forecasted_df, static_importance_df, decoder_importance_df, attention_df = run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_reals)
