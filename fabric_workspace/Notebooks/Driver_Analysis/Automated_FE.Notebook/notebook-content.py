@@ -65,6 +65,78 @@ dl_run = False
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# CELL ********************
+
+## BASE DIRECTORY FOR ALL OUTPUTS
+excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
+
+
+if Topline:
+    series = ['series']
+    initial_target_col =  "Quantity"
+
+    DRV_GRP_COLS = ['Indicator'] 
+    ACT_GRP_COLS = ['Product_Category','series'] 
+
+    level_cols = list(dict.fromkeys(ACT_GRP_COLS + DRV_GRP_COLS)) 
+    actuals_table = T_actuals_table 
+
+    ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
+    DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+
+    actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
+
+    feature_diagnostics_file = excel_base_dir + "Topline/topline_ENCV_feature_diagnostics.xlsx"
+    selected_feature_file = excel_base_dir + "Topline/topline_ENCV_selected_features.xlsx"
+    xgboost_diagnostics_file = excel_base_dir + "Topline/topline_xgboost_feature_diagnostics.xlsx"
+    xgboost_selected_feature_file = excel_base_dir + "Topline/topline_xgboost_selected_feature.xlsx"
+    dl_selected_feature_file = excel_base_dir + "Topline/topline_dl_selected_feature.xlsx"
+
+
+
+else:
+
+    ## MIDDLE
+    series = ['series']
+    initial_target_col = 'Quantity'
+
+    DRV_GRP_COLS = ['Region','Indicator']
+    ACT_GRP_COLS = ['Product_Category', 'Region','series']
+
+    level_cols = list(dict.fromkeys(M_ACT_GRP_COLS + M_DRV_GRP_COLS))
+
+    ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
+    DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+
+
+    actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
+    feature_diagnostics_file = excel_base_dir + "Middle/middle_ENCV_feature_diagnostics.xlsx"
+    selected_feature_file = excel_base_dir + "Middle/middle_ENCV_selected_features.xlsx"
+    xgboost_diagnostics_file = excel_base_dir + "Middle/middle_xgboost_feature_diagnostics.xlsx"
+    xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_selected_features.xlsx"
+    M_dl_selected_feature_file = excel_base_dir + "Middle/middle_dl_selected_feature.xlsx"
+
+
+
+
+
+## shared
+driver_table = "Sales_Forecasting.silver.compiled_drivers"
+target_col = 'Value'
+
+elasticnet_init_features = 10
+xgboost_init_features = 25
+dl_init_features = 30
+
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
 # ## Data Processing / Prep Methods
@@ -686,133 +758,7 @@ def dl_calc_corr(pdf):
 
 # MARKDOWN ********************
 
-# # PARAMETER SETTING
-
-# CELL ********************
-
-## BASE DIRECTORY FOR ALL OUTPUTS
-excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
-
-
-## TOPLINE
-T_series = ['series']
-T_initial_target_col = "Quantity"
-
-T_DRV_GRP_COLS = ['Indicator']
-T_ACT_GRP_COLS = ['Product_Category','series']
-
-T_cols = list(dict.fromkeys(T_ACT_GRP_COLS + T_DRV_GRP_COLS))
-
-T_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
-T_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-
-
-T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
-
-T_feature_diagnostics_file = excel_base_dir + "Topline/topline_ENCV_feature_diagnostics.xlsx"
-T_selected_feature_file = excel_base_dir + "Topline/topline_ENCV_selected_features.xlsx"
-
-T_xgboost_diagnostics_file = excel_base_dir + "Topline/topline_xgboost_feature_diagnostics.xlsx"
-T_xgboost_selected_feature_file = excel_base_dir + "Topline/topline_xgboost_selected_feature.xlsx"
-
-T_dl_selected_feature_file = excel_base_dir + "Topline/topline_dl_selected_feature.xlsx"
-
-
-## MIDDLE
-M_series = ['series']
-M_initial_target_col = 'Quantity'
-
-M_DRV_GRP_COLS = ['Region','Indicator']
-M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
-
-M_cols = list(dict.fromkeys(M_ACT_GRP_COLS + M_DRV_GRP_COLS))
-
-M_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
-M_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-
-
-M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
-M_feature_diagnostics_file = excel_base_dir + "Middle/middle_ENCV_feature_diagnostics.xlsx"
-M_selected_feature_file = excel_base_dir + "Middle/middle_ENCV_selected_features.xlsx"
-
-M_xgboost_diagnostics_file = excel_base_dir + "Middle/middle_xgboost_feature_diagnostics.xlsx"
-M_xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_selected_features.xlsx"
-
-M_dl_selected_feature_file = excel_base_dir + "Middle/middle_dl_selected_feature.xlsx"
-
-
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-if Topline:
-    series = T_series
-    initial_target_col = T_initial_target_col
-
-    DRV_GRP_COLS = T_DRV_GRP_COLS 
-    ACT_GRP_COLS = T_ACT_GRP_COLS 
-
-    level_cols = list(dict.fromkeys(T_cols)) 
-    actuals_table = T_actuals_table 
-
-    ACT_COLS_RENAME = T_ACT_COLS_RENAME
-    DRV_COLS_RENAME = T_DRV_COLS_RENAME
-
-    feature_diagnostics_file = T_feature_diagnostics_file
-    selected_feature_file = T_selected_feature_file 
-    xgb_feature_diagnostics_file = T_xgboost_diagnostics_file 
-    xgb_selected_feature_file = T_xgboost_selected_feature_file
-    dl_selected_feature_file = T_dl_selected_feature_file
-
-else:
-    series = M_series 
-    initial_target_col = M_initial_target_col
-
-    DRV_GRP_COLS = M_DRV_GRP_COLS 
-    ACT_GRP_COLS = M_ACT_GRP_COLS 
-
-    level_cols = list(dict.fromkeys(M_cols))
-    actuals_table = M_actuals_table
-
-    ACT_COLS_RENAME = M_ACT_COLS_RENAME
-    DRV_COLS_RENAME = M_DRV_COLS_RENAME
-
-
-    feature_diagnostics_file = M_feature_diagnostics_file
-    selected_feature_file = M_selected_feature_file
-
-    xgb_feature_diagnostics_file = M_xgboost_diagnostics_file 
-    xgb_selected_feature_file = M_xgboost_selected_feature_file
-
-    dl_selected_feature_file = M_dl_selected_feature_file
-
-
-
-## shared
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
-target_col = 'Value'
-
-elasticnet_init_features = 15
-xgboost_init_features = 100
-dl_init_features = 80
-
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+# ## Pipeline / Notebook Execution
 
 # MARKDOWN ********************
 
@@ -1211,8 +1157,7 @@ if dl_run:
 
     final_features = corr_rank_df.filter(
         (col('rank')<=dl_init_features) &
-        (col('ABS_Correlation')>=.1) &
-        (col('rank')<=30)
+        (col('ABS_Correlation')>=.1)
         )
     
     display(final_features.orderBy(*ACT_GRP_COLS, asc('rank')))
@@ -1261,7 +1206,7 @@ TEST_FRAC = 0.2            # holdout fraction, taken from the END (time-respecti
 N_BOOT = 100                 # bootstrap resamples for stability selection
 BOOT_SAMPLE_FRAC = 0.8
 STABILITY_THRESHOLD = 0.8   # keep features selected in >=60% of bootstraps
-MAX_FEATURES_OUT = 10        # cap on final selected features per series
+MAX_FEATURES_OUT = elasticnet_init_features       # cap on final selected features per series
 
 
 # ============================================================
@@ -1517,7 +1462,7 @@ import builtins
 # ============================================================
 MIN_HISTORY = 24
 TEST_FRAC = 0.2
-MAX_FEATURES_OUT = 25
+MAX_FEATURES_OUT = xgboost_init_features
 
 
 

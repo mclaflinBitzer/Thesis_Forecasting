@@ -22,7 +22,8 @@
 
 # CELL ********************
 
-TFT_output = spark.read.parquet("abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting/Topline/No_Drivers/TFT_Forecast_Output.parquet")
+parquet_path = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting/Topline/Automated_Drivers/TFT_Forecast_Output.parquet"
+TFT_output = spark.read.parquet(parquet_path)
 display(TFT_output)
 
 # METADATA ********************
