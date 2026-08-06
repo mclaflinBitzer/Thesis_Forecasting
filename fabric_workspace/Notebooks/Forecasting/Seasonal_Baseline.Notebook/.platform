@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "Seasonal_Baseline"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "9d5a6d1e-abc6-8474-450b-6f7c3b777740"
+  }
+}

@@ -33,6 +33,83 @@ from pyspark.sql.functions import *
 
 # CELL ********************
 
+T_Arimax_output = spark.read.parquet("abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting/Topline/No_Drivers/Arimax_Output.parquet")
+T_Arimax_output.cache()
+T_actuals = spark.read.table("Sales_Forecasting.silver.topline_cutoff_data")
+T_actuals.cache()
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(T_Arimax_output.select('Product_Category').distinct())
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+print(T_actuals.columns)
+print(T_Arimax_output.columns)
+
+test = (
+    T_actuals
+    .withColumn("Product_Category", concat(col("Product_Category"),lit("__ACT")))
+    .withColumnRenamed("Quantity","Value")
+    .select("Product_Category","Date","Value")
+    .unionByName(
+        T_Arimax_output
+        .groupBy("Product_Category","Date").agg(avg("Forecast").alias("Value"))
+        .withColumn("Product_Category", concat(col("Product_Category"), lit("__FORECAST")))
+        .select("Product_Category","Date","Value")
+    )
+)
+display(test.filter(col('Product_Category').like('MAERSK_ELECTRONICS%')))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(T_actuals)
+display(
+    T_Arimax_output.groupBy('Product_Category','Date')
+    .agg(avg('Forecast').alias('Forecast'))
+    )
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+from pyspark.sql.functions import *
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 data = spark.read.table("Sales_Forecasting.bronze.filtered_data")
 
 # METADATA ********************

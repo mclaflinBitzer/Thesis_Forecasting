@@ -22,6 +22,98 @@
 
 # CELL ********************
 
+import pandas as pd
+from pyspark.sql.functions import *
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+base_folder = "abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Automated_Driver_Analysis"
+
+classic_features = spark.createDataFrame(
+    pd.read_excel(base_folder + "/Middle/middle_ENCV_selected_features.xlsx")
+)
+
+ml_features = spark.createDataFrame(
+    pd.read_excel(base_folder + "/Middle/middle_xgboost_selected_features.xlsx")
+)
+
+dl_features = spark.createDataFrame(
+    pd.read_excel(base_folder + "/Topline/topline_dl_selected_feature.xlsx")
+)
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(dl_features.groupBy('Product_Category').agg(countDistinct('Indicator')))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(classic_features.groupBy('Product_Category','Region').agg(countDistinct('Feature')))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+dl_new = dl_features.filter(col('rank')<=30)
+display(dl_new.groupBy('Product_Category','Region').agg(countDistinct('Indicator')))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(dl_features.limit(10))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(dl_features.groupBy('Product_Category','Region').agg(countDistinct('Indicator')))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from pyspark.sql.functions import col

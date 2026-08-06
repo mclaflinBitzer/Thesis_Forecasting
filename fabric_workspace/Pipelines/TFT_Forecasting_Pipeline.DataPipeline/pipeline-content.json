@@ -1,0 +1,70 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "0133ec6c-86b2-aacd-4adc-42432515cd13",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "run_tft": {
+              "value": {
+                "value": "@pipeline().parameters.run_tft",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "Topline": {
+              "value": {
+                "value": "@pipeline().parameters.Topline",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "rerun_historical_forecasts": {
+              "value": {
+                "value": "@pipeline().parameters.rerun_historical_forecasts",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "driver_status": {
+              "value": {
+                "value": "@pipeline().parameters.driver_status",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "TFT_Notebook",
+        "dependsOn": []
+      }
+    ],
+    "parameters": {
+      "run_tft": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "Topline": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "rerun_historical_forecasts": {
+        "type": "bool",
+        "defaultValue": false
+      },
+      "driver_status": {
+        "type": "string",
+        "defaultValue": "Manual_Drivers"
+      }
+    }
+  }
+}

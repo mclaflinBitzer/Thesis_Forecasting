@@ -424,7 +424,7 @@ def ccf_filtering(df, cols, serie_col):
     ## filter out records with a correlations < .3 or Indicator is NaN
     df_filtered = df.filter(
         (col("max_corr") > 0.15) &
-        # (col("max_corr") < .95) &
+        (col("max_corr") < .95) &
         (col("Indicator").isNotNull()) &
         (col("Indicator") != "NaN") &
         (col('coverage') >= 0.8) &
@@ -652,7 +652,7 @@ def top_x_feature_extraction(df_f_resid, df_ccf_filtered, grp_cols, act_cols, nu
 
 # MARKDOWN ********************
 
-# # Full parameterized pipeline / Horvath implementation
+# # Full parameterized pipeline
 
 # CELL ********************
 
@@ -699,6 +699,12 @@ M_pairs_path = excel_base_dir + "middle_pairs.xlsx"
 M_joined_act_f_dir = parquet_base_dir + "final_middle.parquet"
 M_ccf_output_dir = parquet_base_dir + 'middle_ccf_base.parquet'
 M_final_feature_dir = excel_base_dir + 'middle_recommended_features.xlsx'
+
+
+
+
+
+
 
 Topline = False
 
@@ -765,6 +771,33 @@ series_col = ['series']
 compiled_drivers = spark.read.table("Sales_Forecasting.silver.compiled_drivers").select("Country","Indicator","Region","Date","Value")
 
 
+## Aggregating the drivers based upon the DRV GRP COLS defined 
+aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Value').alias('Value'))
+
+# if Indicator is the only value in DRV GRP COLS then the data will be aggregated at a lower level than world
+    # this ensures that "WORLD" level aggregated drivers are added to the aggregated_drivers set
+
+if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
+    # creates world level drivers
+    world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
+    world_agg = world_agg.withColumn("Indicator", concat_ws("__", col("Indicator"), lit("WORLD")))
+
+    
+    # populates the other DRV GRP COLS defined that aren't "Indicator" with the value of "World"
+    for cols in DRV_GRP_COLS:
+        if cols!='Indicator':
+            distinct_vals = compiled_drivers.select(cols).distinct()
+            world_agg = world_agg.crossJoin(distinct_vals)
+            print(f"{cols} to the world agg using cross join of distinct values from the drivers data")
+
+    aggregated_drivers = aggregated_drivers.unionByName(world_agg)
+    
+else:
+    print('world agg already done')
+
+
+
+
 # METADATA ********************
 
 # META {
@@ -783,7 +816,7 @@ adf_schema = StructType(
     ]
 )
 
-drivers = compiled_drivers.groupBy(*DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
+drivers = aggregated_drivers.groupBy(*DRV_GRP_COLS, 'Date').agg(sum('Value').alias('Value'))
 adf_results = drivers.groupBy(*DRV_GRP_COLS).applyInPandas(adf, adf_schema)
 display(adf_results.groupBy('adf_stationary_flag').count())
 
@@ -833,7 +866,7 @@ stationary_df.to_excel(stationary_stats_output_path)
 
 # CELL ********************
 
-feature_set = compiled_drivers
+feature_set = aggregated_drivers
 cutoff_data = spark.read.table(actuals_table).withColumnRenamed(target_col, 'Value')
 
 
@@ -959,12 +992,13 @@ ccf_output.write.mode('overwrite').parquet(ccf_output_dir)
 
 # CELL ********************
 
-ccf_filtered = ccf_filtering(ccf_output, JOIN_T_F_cols, series_col)
+ccf_filtered = ccf_filtering(ccf_output, JOIN_T_F_cols, series_col).cache()
 
 display(ccf_output.groupBy(*ACT_GRP_COLS).agg(countDistinct(*DRV_GRP_COLS).alias('count_indicators')))
 
 final_features = top_x_feature_extraction(final, ccf_filtered, JOIN_T_F_cols, ACT_GRP_COLS, num_features)
 
+final_features.cache()
 display(final_features.groupBy(*ACT_GRP_COLS).agg(countDistinct(*DRV_GRP_COLS).alias('count_indicators')))
 
 
@@ -979,17 +1013,6 @@ display(final_features.groupBy(*ACT_GRP_COLS).agg(countDistinct(*DRV_GRP_COLS).a
 
 final_features_df = final_features.orderBy(*ACT_GRP_COLS, asc('feature_rank'), *DRV_GRP_COLS, 'Lag').toPandas()
 final_features_df.to_excel(final_feature_dir)
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 

@@ -25,22 +25,10 @@
 
 # CELL ********************
 
-%pip install ruptures
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 from pyspark.sql.functions import *
 import pandas as pd
 from pyspark.sql.types import *
 from pyspark.sql.utils import AnalysisException
-import ruptures as rpt
 import numpy as np
 
 # METADATA ********************
@@ -408,33 +396,107 @@ def group_data(df, group_cols, target_col):
 
 # CELL ********************
 
+# def fill_data(df, group_cols, target_col):
+#     ## creating a date_df that has all of the date intervals between the min and max date of the actuals w/ a frequency of 1 month
+#     min_date, max_date = df.selectExpr("min(Date)", "max(Date)").first()
+#     date_df = (
+#         spark.createDataFrame([(min_date, max_date)], ["start", "end"])
+#         .withColumn("Date", explode(sequence("start", "end", expr("INTERVAL 1 MONTH"))))
+#         .select("Date")
+#     )
+
+#     ## creates a dataframe that contains all combinations of the Date field and grouping columns
+#     if group_cols:
+#         group_df = df.select(*group_cols).distinct()
+#         full_grid = group_df.crossJoin(date_df)
+#     else:
+#         full_grid = date_df
+
+
+#     ## creates a dataframe with all combinations of Date & grouping columns and fills Null values within the target column w/ 0s
+#     filled_df = (full_grid\
+#                     .join(df, on=group_cols+["Date"], how="left")\
+#                     .fillna({target_col:0})
+#                     )
+
+#     # extract the needed columns & return the ordered dataframe
+#     final_df = filled_df.select(*group_cols, "Date", target_col).orderBy(*group_cols, "Date")
+
+#     return final_df
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 def fill_data(df, group_cols, target_col):
-    ## creating a date_df that has all of the date intervals between the min and max date of the actuals w/ a frequency of 1 month
-    min_date, max_date = df.selectExpr("min(Date)", "max(Date)").first()
-    date_df = (
-        spark.createDataFrame([(min_date, max_date)], ["start", "end"])
-        .withColumn("Date", explode(sequence("start", "end", expr("INTERVAL 1 MONTH"))))
-        .select("Date")
+    """
+    Create a complete monthly time series for every group using the
+    global minimum and maximum dates across the dataset.
+
+    Missing target values are filled with 0.
+    """
+
+    # ---------------------------------------------------------
+    # Global date range
+    # ---------------------------------------------------------
+    min_date, max_date = (
+        df.selectExpr(
+            "min(Date) as min_date",
+            "max(Date) as max_date"
+        )
+        .first()
     )
 
-    ## creates a dataframe that contains all combinations of the Date field and grouping columns
-    if group_cols:
-        group_df = df.select(*group_cols).distinct()
-        full_grid = group_df.crossJoin(date_df)
-    else:
-        full_grid = date_df
+    # ---------------------------------------------------------
+    # Monthly calendar
+    # ---------------------------------------------------------
+    date_df = (
+        spark.range(1)
+        .select(
+            explode(
+                sequence(
+                    lit(min_date),
+                    lit(max_date),
+                    expr("INTERVAL 1 MONTH")
+                )
+            ).alias("Date")
+        )
+    )
 
+    # ---------------------------------------------------------
+    # Distinct groups
+    # ---------------------------------------------------------
+    groups_df = df.select(*group_cols).distinct()
 
-    ## creates a dataframe with all combinations of Date & grouping columns and fills Null values within the target column w/ 0s
-    filled_df = (full_grid\
-                    .join(df, on=group_cols+["Date"], how="left")\
-                    #.fillna({target_col:0})
-                    )
+    # ---------------------------------------------------------
+    # Complete group × month grid
+    # ---------------------------------------------------------
+    full_grid = groups_df.crossJoin(date_df)
 
-    # extract the needed columns & return the ordered dataframe
-    final_df = filled_df.select(*group_cols, "Date", target_col).orderBy(*group_cols, "Date")
+    # ---------------------------------------------------------
+    # Join original data
+    # ---------------------------------------------------------
+    filled_df = (
+        full_grid
+        .join(df, on=group_cols + ["Date"], how="left")
+        .withColumn(
+            target_col,
+            coalesce(col(target_col), lit(0.0))
+        )
+    )
 
-    return final_df
+    # ---------------------------------------------------------
+    # Return ordered dataframe
+    # ---------------------------------------------------------
+    return (
+        filled_df
+        .orderBy(*group_cols, "Date")
+    )
 
 # METADATA ********************
 
@@ -527,22 +589,22 @@ print(expected)
 
 
 
-def check_gaps(pdf: pd.DataFrame) -> pd.DataFrame:
-    pdf      = pdf.sort_values("Date")
-    n_obs    = len(pdf)
-    expected = pd.date_range(pdf["Date"].min(),
-                             pdf["Date"].max(), freq="MS")
-    return pd.DataFrame([{
-        "series_id":  pdf["series_id"].iloc[0],
-        "n_obs":      n_obs,
-        "n_expected": len(expected),
-        "has_gaps":   n_obs != len(expected)
-    }])
+# def check_gaps(pdf: pd.DataFrame) -> pd.DataFrame:
+#     pdf      = pdf.sort_values("Date")
+#     n_obs    = len(pdf)
+#     expected = pd.date_range(pdf["Date"].min(),
+#                              pdf["Date"].max(), freq="MS")
+#     return pd.DataFrame([{
+#         "series_id":  pdf["series_id"].iloc[0],
+#         "n_obs":      n_obs,
+#         "n_expected": len(expected),
+#         "has_gaps":   n_obs != len(expected)
+#     }])
 
-gap_report = df_sales.groupBy("series_id") \
-    .applyInPandas(check_gaps, schema=gap_check_schema)
+# gap_report = df_sales.groupBy("series_id") \
+#     .applyInPandas(check_gaps, schema=gap_check_schema)
 
-gap_report.filter(F.col("has_gaps")).show()
+# gap_report.filter(F.col("has_gaps")).show()
 
 # METADATA ********************
 
@@ -557,21 +619,10 @@ gap_report.filter(F.col("has_gaps")).show()
 
 # CELL ********************
 
-## need to implement the fillna w/ 0 at some point TDB
-middle_test = middle_test.fillna({"Quantity":0})
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 topline_df = group_data(filtered_actuals, TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
 topline_df = topline_df.withColumn("series", concat_ws("___",*TOPLINE_GRP_COLS))
 write_to_lakehouse(topline_df, "Sales_Forecasting.bronze.topline_raw")
+
 
 topline_filled_df = fill_data(topline_df, TOPLINE_GRP_COLS, TOPLINE_TARGET_COL)
 topline_filled_df = topline_filled_df.withColumn("series", concat_ws("___",*TOPLINE_GRP_COLS))
@@ -593,26 +644,6 @@ write_to_lakehouse(middle_df, "Sales_Forecasting.bronze.middle_raw")
 middle_filled_df = fill_data(middle_df, MIDDLE_GRP_COLS, MIDDLE_TARGET_COL)
 middle_filled_df = middle_filled_df.withColumn("series", concat_ws("___",*MIDDLE_GRP_COLS))
 write_to_lakehouse(middle_filled_df, MIDDLE_TABLE_NAME)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 
 # METADATA ********************
 

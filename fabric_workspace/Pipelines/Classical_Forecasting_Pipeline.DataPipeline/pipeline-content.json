@@ -1,0 +1,100 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "4a1ae080-cf0c-9355-4119-5357653f1aa5",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "Topline": {
+              "value": {
+                "value": "@pipeline().parameters.Topline",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "rerun_historical_forecasts": {
+              "value": {
+                "value": "@pipeline().parameters.rerun_historical_forecasts",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "ets_run": {
+              "value": {
+                "value": "@pipeline().parameters.ets_run",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "arimax_run": {
+              "value": {
+                "value": "@pipeline().parameters.arimax_run",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "sarimax_run": {
+              "value": {
+                "value": "@pipeline().parameters.sarimax_run",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "prophet_run": {
+              "value": {
+                "value": "@pipeline().parameters.prophet_run",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "driver_status": {
+              "value": {
+                "value": "@pipeline().parameters.driver_status",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Classical_Forecasting",
+        "dependsOn": []
+      }
+    ],
+    "parameters": {
+      "Topline": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "rerun_historical_forecasts": {
+        "type": "bool",
+        "defaultValue": false
+      },
+      "ets_run": {
+        "type": "bool",
+        "defaultValue": true
+      },
+      "arimax_run": {
+        "type": "bool"
+      },
+      "sarimax_run": {
+        "type": "bool"
+      },
+      "prophet_run": {
+        "type": "bool"
+      },
+      "driver_status": {
+        "type": "string",
+        "defaultValue": "No_Drivers"
+      }
+    }
+  }
+}

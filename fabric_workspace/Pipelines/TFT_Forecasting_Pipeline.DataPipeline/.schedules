@@ -1,0 +1,245 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/schedules/1.0.0/schema.json",
+  "schedules": [
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-04T00:00:00",
+        "endDateTime": "2027-08-04T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "10:30"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 5
+        }
+      },
+      "parameters": [
+        {
+          "name": "run_tft",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "Topline",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "Manual_Drivers",
+          "type": "Text"
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-04T00:00:00",
+        "endDateTime": "2027-08-04T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "11:15"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 5
+        }
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "run_tft",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "Automated_Drivers",
+          "type": "Text"
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-04T00:00:00",
+        "endDateTime": "2027-08-04T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "12:00"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 5
+        }
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "run_tft",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "No_Drivers",
+          "type": "Text"
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-04T00:00:00",
+        "endDateTime": "2027-08-04T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "12:45"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 5
+        }
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": false,
+          "type": "Boolean"
+        },
+        {
+          "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "run_tft",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "No_Drivers",
+          "type": "Text"
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-04T00:00:00",
+        "endDateTime": "2027-08-04T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "13:30"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 5
+        }
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": false,
+          "type": "Boolean"
+        },
+        {
+          "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "run_tft",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "Manual_Drivers",
+          "type": "Text"
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-04T00:00:00",
+        "endDateTime": "2027-08-04T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "14:30"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 5
+        }
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": false,
+          "type": "Boolean"
+        },
+        {
+          "name": "rerun_historical_forecasts",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "run_tft",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "Automated_Drivers",
+          "type": "Text"
+        }
+      ]
+    }
+  ]
+}

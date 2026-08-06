@@ -48,15 +48,87 @@ from functools import reduce
 # CELL ********************
 
 # Topline True or False for Topline vs Middle run
-Topline = True
+Topline = False
 
 ## Declaring which feature selection processes run 
     # ElasticNetCV -> Classical Statistical Models
     # XGBoost -> ML Models
     # DL -> DL Models
-elasticnet_run = True
-xgboost_run = False
+elasticnet_run = False
+xgboost_run = True
 dl_run = False
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+## BASE DIRECTORY FOR ALL OUTPUTS
+excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
+
+
+if Topline:
+    series = ['series']
+    initial_target_col =  "Quantity"
+
+    DRV_GRP_COLS = ['Indicator'] 
+    ACT_GRP_COLS = ['Product_Category','series'] 
+
+    level_cols = list(dict.fromkeys(ACT_GRP_COLS + DRV_GRP_COLS)) 
+    actuals_table = T_actuals_table 
+
+    ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
+    DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+
+    actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
+
+    feature_diagnostics_file = excel_base_dir + "Topline/topline_ENCV_feature_diagnostics.xlsx"
+    selected_feature_file = excel_base_dir + "Topline/topline_ENCV_selected_features.xlsx"
+    xgboost_diagnostics_file = excel_base_dir + "Topline/topline_xgboost_feature_diagnostics.xlsx"
+    xgboost_selected_feature_file = excel_base_dir + "Topline/topline_xgboost_selected_feature.xlsx"
+    dl_selected_feature_file = excel_base_dir + "Topline/topline_dl_selected_feature.xlsx"
+
+
+
+else:
+
+    ## MIDDLE
+    series = ['series']
+    initial_target_col = 'Quantity'
+
+    DRV_GRP_COLS = ['Region','Indicator']
+    ACT_GRP_COLS = ['Product_Category', 'Region','series']
+
+    level_cols = list(dict.fromkeys(M_ACT_GRP_COLS + M_DRV_GRP_COLS))
+
+    ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
+    DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
+
+
+    actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
+    feature_diagnostics_file = excel_base_dir + "Middle/middle_ENCV_feature_diagnostics.xlsx"
+    selected_feature_file = excel_base_dir + "Middle/middle_ENCV_selected_features.xlsx"
+    xgboost_diagnostics_file = excel_base_dir + "Middle/middle_xgboost_feature_diagnostics.xlsx"
+    xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_selected_features.xlsx"
+    M_dl_selected_feature_file = excel_base_dir + "Middle/middle_dl_selected_feature.xlsx"
+
+
+
+
+
+## shared
+driver_table = "Sales_Forecasting.silver.compiled_drivers"
+target_col = 'Value'
+
+elasticnet_init_features = 10
+xgboost_init_features = 25
+dl_init_features = 30
+
+
 
 # METADATA ********************
 
@@ -666,61 +738,6 @@ def dl_calc_corr(pdf):
 
 # CELL ********************
 
-## BASE DIRECTORY FOR ALL OUTPUTS
-excel_base_dir = "/lakehouse/default/Files/Automated_Driver_Analysis/"
-
-
-## TOPLINE
-T_series = ['series']
-T_initial_target_col = "Quantity"
-
-T_DRV_GRP_COLS = ['Indicator']
-T_ACT_GRP_COLS = ['Product_Category','series']
-
-T_cols = list(dict.fromkeys(T_ACT_GRP_COLS + T_DRV_GRP_COLS))
-
-T_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
-T_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-
-
-T_actuals_table = "Sales_Forecasting.silver.topline_cutoff_data"
-
-T_feature_diagnostics_file = excel_base_dir + "Topline/topline_feature_diagnostics.xlsx"
-T_selected_feature_file = excel_base_dir + "Topline/topline_selected_features.xlsx"
-
-T_xgboost_diagnostics_file = excel_base_dir + "Topline/topline_xgboost_feature_diagnostics.xlsx"
-T_xgboost_selected_feature_file = excel_base_dir + "Topline/topline_xgboost_selected_feature.xlsx"
-
-T_dl_selected_feature_file = excel_base_dir + "Topline/topline_dl_selected_feature.xlsx"
-
-
-## MIDDLE
-M_series = ['series']
-M_initial_target_col = 'Quantity'
-
-M_DRV_GRP_COLS = ['Region','Indicator']
-M_ACT_GRP_COLS = ['Product_Category', 'Region','series']
-
-M_cols = list(dict.fromkeys(M_ACT_GRP_COLS + M_DRV_GRP_COLS))
-
-M_ACT_COLS_RENAME = {"Date":"target_date","residual":"target_residual"}  
-M_DRV_COLS_RENAME = {"Date":"feature_date","residual":"feature_residual"}
-
-
-M_actuals_table = "Sales_Forecasting.silver.middle_cutoff_data"
-M_feature_diagnostics_file = excel_base_dir + "Middle/middle_feature_diagnostics.xlsx"
-M_selected_feature_file = excel_base_dir + "Middle/middle_selected_features.xlsx"
-
-M_xgboost_diagnostics_file = excel_base_dir + "Middle/middle_xgboost_feature_diagnostics.xlsx"
-M_xgboost_selected_feature_file = excel_base_dir + "Middle/middle_xgboost_selected_features.xlsx"
-
-M_dl_selected_feature_file = excel_base_dir + "middle_dl_selected_feature.xlsx"
-
-
-## shared
-col_renamed = {"Quantity":"target_value","Value":"feature_value"}
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
-
 
 # METADATA ********************
 
@@ -730,60 +747,6 @@ driver_table = "Sales_Forecasting.silver.compiled_drivers"
 # META }
 
 # CELL ********************
-
-
-if Topline:
-    series = T_series
-    initial_target_col = T_initial_target_col
-
-    DRV_GRP_COLS = T_DRV_GRP_COLS 
-    ACT_GRP_COLS = T_ACT_GRP_COLS 
-
-    level_cols = list(dict.fromkeys(T_cols)) 
-    actuals_table = T_actuals_table 
-
-    ACT_COLS_RENAME = T_ACT_COLS_RENAME
-    DRV_COLS_RENAME = T_DRV_COLS_RENAME
-
-    feature_diagnostics_file = T_feature_diagnostics_file
-    selected_feature_file = T_selected_feature_file 
-    xgb_feature_diagnostics_file = T_xgboost_diagnostics_file 
-    xgb_selected_feature_file = T_xgboost_selected_feature_file
-    dl_selected_feature_file = T_dl_selected_feature_file
-
-else:
-    series = M_series 
-    inital_target_col = M_initial_target_col
-
-    DRV_GRP_COLS = M_DRV_GRP_COLS 
-    ACT_GRP_COLS = M_ACT_GRP_COLS 
-
-    level_cols = list(dict.fromkeys(M_cols))
-    actuals_table = M_actuals_table
-
-    ACT_COLS_RENAME = M_ACT_COLS_RENAME
-    DRV_COLS_RENAME = M_DRV_COLS_RENAME
-
-
-    feature_diagnostics_file = M_feature_diagnostics_file
-    selected_feature_file = M_selected_feature_file
-
-    xgb_feature_diagnostics_file = M_xgboost_diagnostics_file 
-    xgb_selected_feature_file = M_xgboost_selected_feature_file
-
-    dl_selected_feature_file = M_dl_selected_feature_file
-
-
-
-## shared
-col_renamed = {"Quantity":"target_value","Value":"feature_value"}
-driver_table = "Sales_Forecasting.silver.compiled_drivers"
-target_col = 'Value'
-
-elasticnet_init_features = 15
-xgboost_init_features = 200
-dl_init_features = 80
-
 
 
 # METADATA ********************
@@ -795,6 +758,10 @@ dl_init_features = 80
 
 # MARKDOWN ********************
 
+# ## Pipeline / Notebook Execution
+
+# MARKDOWN ********************
+
 # #### Reading Data
 
 # CELL ********************
@@ -803,7 +770,10 @@ dl_init_features = 80
 compiled_drivers = spark.read.table(driver_table).select("Country","Indicator","Region","Date","Value")
 
 # ACTUALS TABLE
-data = spark.read.table(actuals_table).withColumnRenamed(initial_target_col,target_col)
+data = (
+    spark.read.table(actuals_table)
+    .withColumnRenamed(initial_target_col,target_col)
+)
 ## aggregating based on the ACT GRP COLS defined
 data = data.groupBy(*ACT_GRP_COLS,"Date").agg(sum(target_col).alias(target_col))
 
@@ -829,12 +799,15 @@ aggregated_drivers = compiled_drivers.groupBy(*DRV_GRP_COLS,'Date').agg(sum('Val
 if 'Indicator' in DRV_GRP_COLS and len(DRV_GRP_COLS) > 1:
     # creates world level drivers
     world_agg = compiled_drivers.groupBy('Indicator','Date').agg(sum("Value").alias("Value"))
+    world_agg = world_agg.withColumn("Indicator", concat_ws("__", col("Indicator"), lit("WORLD")))
+
     
     # populates the other DRV GRP COLS defined that aren't "Indicator" with the value of "World"
     for cols in DRV_GRP_COLS:
         if cols!='Indicator':
-            world_agg = world_agg.withColumn(cols, lit("World"))
-            print(f"{cols} added using .withColumn, populated with lit(World)")
+            distinct_vals = compiled_drivers.select(cols).distinct()
+            world_agg = world_agg.crossJoin(distinct_vals)
+            print(f"{cols} to the world agg using cross join of distinct values from the drivers data")
 
     aggregated_drivers = aggregated_drivers.unionByName(world_agg)
     
@@ -1161,8 +1134,7 @@ if dl_run:
 
     ## CALCULATING CORRELATION PER COMBINATION
     corr_schema = StructType(
-        [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
-        [StructField(c, StringType(), False) for c in DRV_GRP_COLS] +
+        [StructField(c, StringType(), False) for c in join_cols] +
         [
             StructField("Correlation", DoubleType(), True),
             StructField("Lag", IntegerType(), True)
@@ -1171,7 +1143,7 @@ if dl_run:
 
     corr_df = (
         joined_data_features
-        .groupBy(*(ACT_GRP_COLS + DRV_GRP_COLS))
+        .groupBy(*(join_cols))
         .applyInPandas(dl_calc_corr, schema=corr_schema)
     )
 
@@ -1191,17 +1163,7 @@ if dl_run:
     display(final_features.orderBy(*ACT_GRP_COLS, asc('rank')))
 
     final_features_df = final_features.orderBy(*ACT_GRP_COLS, asc('rank')).toPandas()
-    final_features_df.to_excel(dl_selected_feature_file)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+    final_features_df.to_excel(dl_selected_feature_file, index=False)
 
 # METADATA ********************
 
@@ -1224,10 +1186,6 @@ if dl_run:
 
 # ## Elastic Net 
 
-# MARKDOWN ********************
-
-# ## potential code for elasticnetCV
-
 # CELL ********************
 
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
@@ -1248,7 +1206,7 @@ TEST_FRAC = 0.2            # holdout fraction, taken from the END (time-respecti
 N_BOOT = 100                 # bootstrap resamples for stability selection
 BOOT_SAMPLE_FRAC = 0.8
 STABILITY_THRESHOLD = 0.8   # keep features selected in >=60% of bootstraps
-MAX_FEATURES_OUT = 10        # cap on final selected features per series
+MAX_FEATURES_OUT = elasticnet_init_features       # cap on final selected features per series
 
 
 # ============================================================
@@ -1363,20 +1321,7 @@ def fit_and_select_features(pdf: pd.DataFrame) -> pd.DataFrame:
 
     test_r2 = model.score(X_test_s, y_test)
 
-    # ---- bootstrap stability selection on train fold ----
-    stability_counts = pd.Series(0, index=feature_cols, dtype=float)
-    for _ in range(N_BOOT):
-        boot_idx = X_train_s.sample(frac=BOOT_SAMPLE_FRAC, replace=True).index
-        try:
-            m = ElasticNetCV(
-                l1_ratio=[model.l1_ratio_], alphas=[model.alpha_],
-                cv=2, max_iter=5000,
-            ).fit(X_train_s.loc[boot_idx], y_train.loc[boot_idx])
-            stability_counts += (pd.Series(m.coef_, index=feature_cols) != 0).astype(int)
-        except Exception:
-            continue
-            
-    stability_score = stability_counts / N_BOOT
+
 
     coefs = pd.Series(model.coef_, index=feature_cols)
     abs_coef = coefs.abs()
@@ -1468,17 +1413,17 @@ if elasticnet_run:
         )
         .withColumn('feature_rank', row_number().over(w))
         .filter(col('feature_rank')<=15)
-        .select('Feature','Coefficient','importance_pct','stability_score','feature_rank')
+        .select(*ACT_GRP_COLS,'Feature','Coefficient','importance_pct','stability_score','feature_rank')
     )
 
 
     feature_diagnostics_pdf = feature_diagnostics.toPandas()
 
-    feature_diagnostics_pdf.to_excel(feature_diagnostics_file)
+    feature_diagnostics_pdf.to_excel(feature_diagnostics_file, index=False)
 
 
     selected_features_pdf = selected_features.toPandas()
-    selected_features_pdf.to_excel(selected_feature_file)
+    selected_features_pdf.to_excel(selected_feature_file, index=False)
 
 
 # METADATA ********************
@@ -1517,11 +1462,9 @@ import builtins
 # ============================================================
 MIN_HISTORY = 24
 TEST_FRAC = 0.2
-N_BOOT = 30                    # bootstrap resamples for stability selection
-BOOT_SAMPLE_FRAC = 0.8
-STABILITY_THRESHOLD = 0.6
-MAX_FEATURES_OUT = 25
-PERM_REPEATS = 30              # repeats for permutation importance
+MAX_FEATURES_OUT = xgboost_init_features
+
+
 
 # structural controls — absorb trend/seasonality so driver importances aren't
 # penalized for failing to explain target movement they were never suited to explain
@@ -1529,10 +1472,8 @@ CONTROL_COLS = ["time_trend", "y_lag1", "y_lag12"]
 
 # XGBoost hyperparameter grid — small, deliberately conservative given short series
 XGB_PARAM_GRID = [
-    {"max_depth": 2, "learning_rate": 0.05, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
-    {"max_depth": 3, "learning_rate": 0.05, "n_estimators": 200, "subsample": 0.8, "colsample_bytree": 0.8},
-    {"max_depth": 3, "learning_rate": 0.1,  "n_estimators": 100, "subsample": 0.7, "colsample_bytree": 0.7},
-    {"max_depth": 4, "learning_rate": 0.05, "n_estimators": 150, "subsample": 0.8, "colsample_bytree": 0.6},
+    {"max_depth": 3, "learning_rate": 0.05, "n_estimators": 50,"subsample": 0.8,
+     "colsample_bytree": 0.6, "objective":"reg:squarederror", "random_state":42, "n_jobs":1}
 ]
 
 
@@ -1543,11 +1484,8 @@ xgb_diagnostics_schema = StructType(
     [StructField(c, StringType(), False) for c in ACT_GRP_COLS] +
     [
         StructField("Feature", StringType(), False),
-        StructField("importance_gain", DoubleType(), True),      # split-quality based
-        StructField("importance_perm", DoubleType(), True),      # permutation based (primary)
-        StructField("importance_perm_std", DoubleType(), True),
-        StructField("importance_pct", DoubleType(), True),
-        StructField("stability_score", DoubleType(), True),
+        StructField("gain_importance", DoubleType(), True),
+        StructField("gain_importance_pct", DoubleType(), True),
         StructField("selected", IntegerType(), True),
         StructField("is_control", IntegerType(), False),
         StructField("best_max_depth", IntegerType(), True),
@@ -1590,13 +1528,13 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
         cols = feature_cols if cols is None else cols
         return pd.DataFrame([{
             **id_vals, "Feature": f,
-            "importance_gain": None, "importance_perm": None, "importance_perm_std": None,
-            "importance_pct": None, "stability_score": None, "selected": 0,
+            "gain_importance": None, "gain_importance_pct": None, "selected": 0,
             "is_control": int(f in CONTROL_COLS),
             "best_max_depth": None, "best_learning_rate": None, "best_n_estimators": None,
             "test_r2": None, "controls_only_r2": None, "naive_r2": None,
             "drivers_add_value": None, "n_obs": n_obs,
         } for f in cols])
+
 
     if len(wide) < MIN_HISTORY or len(driver_cols) == 0:
         return empty_result(feature_cols, len(wide))
@@ -1624,37 +1562,12 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
     X_train = X_train.fillna(medians)
     X_test = X_test.fillna(medians)
 
-    # ---- hyperparameter search via TimeSeriesSplit CV ----
-    n_splits = builtins.min(5, builtins.max(2, len(y_train) // 12))
-    tscv = TimeSeriesSplit(n_splits=n_splits)
 
-    best_score, best_params = -np.inf, None
-    for params in XGB_PARAM_GRID:
-        fold_scores = []
-        for tr_idx, val_idx in tscv.split(X_train):
-            X_tr, X_val = X_train.iloc[tr_idx], X_train.iloc[val_idx]
-            y_tr, y_val = y_train.iloc[tr_idx], y_train.iloc[val_idx]
-            try:
-                m = xgb.XGBRegressor(
-                    objective="reg:squarederror", random_state=42,
-                    n_jobs=1,  # avoid nested parallelism fighting Spark's own executor threads
-                    **params
-                ).fit(X_tr, y_tr)
-                fold_scores.append(m.score(X_val, y_val))
-            except Exception:
-                fold_scores.append(-np.inf)
-        mean_score = np.mean(fold_scores)
-        if mean_score > best_score:
-            best_score, best_params = mean_score, params
-
-    if best_params is None:
-        return empty_result(feature_cols, len(wide))
+    best_params = XGB_PARAM_GRID[0]
 
     # ---- fit final model on full training set with best params ----
     try:
-        model = xgb.XGBRegressor(
-            objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-        ).fit(X_train, y_train)
+        model = xgb.XGBRegressor(**best_params).fit(X_train, y_train)
     except Exception:
         return empty_result(feature_cols, len(wide))
 
@@ -1662,57 +1575,34 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
     naive_r2 = r2_score(y_test, np.full_like(y_test, y_train.mean(), dtype=float))
 
     # ---- controls-only baseline: isolates drivers' marginal contribution ----
-    ctrl_model = xgb.XGBRegressor(
-        objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-    ).fit(X_train[CONTROL_COLS], y_train)
+    ctrl_model = xgb.XGBRegressor(**best_params).fit(X_train[CONTROL_COLS], y_train)
     controls_only_r2 = ctrl_model.score(X_test[CONTROL_COLS], y_test)
     drivers_add_value = int(test_r2 > controls_only_r2)
 
     # ---- gain-based importance (fast, built-in, but biased toward high-cardinality splits) ----
-    gain_importance = pd.Series(model.feature_importances_, index=feature_cols)
-
-    # ---- permutation importance on TEST set (primary metric — unbiased, model-agnostic) ----
-    perm = permutation_importance(
-        model, X_test, y_test, n_repeats=PERM_REPEATS, random_state=42, n_jobs=1
+    gain_importance = pd.Series(
+        model.feature_importances_,
+        index=feature_cols
     )
-    perm_importance = pd.Series(perm.importances_mean, index=feature_cols).clip(lower=0)
-    perm_importance_std = pd.Series(perm.importances_std, index=feature_cols)
 
-    total_perm = perm_importance.sum()
-    importance_pct = (perm_importance / total_perm * 100) if total_perm > 0 else perm_importance * 0
+    total_gain = gain_importance.sum()
 
-    # ---- bootstrap stability selection ----
-    stability_counts = pd.Series(0, index=feature_cols, dtype=float)
-    for _ in range(N_BOOT):
-        boot_idx = X_train.sample(frac=BOOT_SAMPLE_FRAC, replace=True).index
-        try:
-            m = xgb.XGBRegressor(
-                objective="reg:squarederror", random_state=42, n_jobs=1, **best_params
-            ).fit(X_train.loc[boot_idx], y_train.loc[boot_idx])
-            boot_perm = permutation_importance(
-                m, X_test, y_test, n_repeats=10, random_state=42, n_jobs=1
-            )
-            # a feature "counts" this round if its permutation importance is meaningfully > 0
-            stability_counts += (pd.Series(boot_perm.importances_mean, index=feature_cols) > 1e-6).astype(int)
-        except Exception:
-            continue
-    stability_score = stability_counts / N_BOOT
+    gain_importance_pct = (
+        gain_importance / total_gain * 100
+        if total_gain > 0
+        else gain_importance * 0
+    )
 
     selected = (
-        (stability_score >= STABILITY_THRESHOLD) &
-        (perm_importance > 0) &
-        (~pd.Series(feature_cols, index=feature_cols).isin(CONTROL_COLS))  # controls never "selected"
-        #&   drivers_add_value  # series-level gate: only trust selection if drivers beat controls-only
+        (gain_importance > 0) &
+        (~pd.Series(feature_cols, index=feature_cols).isin(CONTROL_COLS))
     )
 
     out = pd.DataFrame({
         **{c: id_vals[c] for c in ACT_GRP_COLS},
         "Feature": feature_cols,
-        "importance_gain": gain_importance.values,
-        "importance_perm": perm_importance.values,
-        "importance_perm_std": perm_importance_std.values,
-        "importance_pct": importance_pct.values,
-        "stability_score": stability_score.values,
+        "gain_importance": gain_importance.values,
+        "gain_importance_pct": gain_importance_pct.values,
         "selected": selected.astype(int).values,
         "is_control": [int(f in CONTROL_COLS) for f in feature_cols],
         "best_max_depth": best_params["max_depth"],
@@ -1722,11 +1612,11 @@ def fit_xgb_feature_importance(pdf: pd.DataFrame) -> pd.DataFrame:
         "controls_only_r2": controls_only_r2,
         "naive_r2": naive_r2,
         "drivers_add_value": int(drivers_add_value),
-        "n_obs": len(wide),
+        "n_obs": len(y),
     })
 
     # cap selected drivers at MAX_FEATURES_OUT, ranked by importance_pct
-    out = out.sort_values(["selected", "importance_pct"], ascending=[False, False])
+    out = out.sort_values(["selected", "gain_importance_pct"], ascending=[False, False])
     keep_mask = out["selected"] == 1
     if keep_mask.sum() > MAX_FEATURES_OUT:
         drop_idx = out[keep_mask].index[MAX_FEATURES_OUT:]
@@ -1761,18 +1651,29 @@ if xgboost_run:
     )
 
     xgb_feature_diagnostics.cache()
-    display(xgb_feature_diagnostics.orderBy(*ACT_GRP_COLS, desc("importance_pct")))
+    display(xgb_feature_diagnostics.orderBy(*ACT_GRP_COLS, desc("gain_importance_pct")))
 
-    xgb_selected_features = xgb_feature_diagnostics.filter(col('selected')==1).orderBy(*ACT_GRP_COLS,desc('importance_pct'))
+    xgb_selected_features = xgb_feature_diagnostics.filter(col('selected')==1).orderBy(*ACT_GRP_COLS,desc('gain_importance_pct'))
 
     xgb_feature_diagnostics_pdf = xgb_feature_diagnostics.toPandas()
 
-    xgb_feature_diagnostics_pdf.to_excel(xgb_feature_diagnostics_file)
+    xgb_feature_diagnostics_pdf.to_excel(xgb_feature_diagnostics_file, index=False)
 
 
     xgb_selected_features_pdf = xgb_selected_features.toPandas()
-    xgb_selected_features_pdf.to_excel(xgb_selected_feature_file)
+    xgb_selected_features_pdf.to_excel(xgb_selected_feature_file, index=False)
 
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(xgb_selected_features)
 
 # METADATA ********************
 
