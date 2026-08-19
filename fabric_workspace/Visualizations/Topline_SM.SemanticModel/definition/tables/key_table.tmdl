@@ -1,0 +1,56 @@
+table key_table
+	lineageTag: 315b1e96-a9ec-46b5-a737-dd966d5839ca
+	sourceLineageTag: [Topline_Eval].[key_table]
+
+	column identifier_col
+		dataType: string
+		lineageTag: 5800b915-8a13-4992-a34c-f3c4a6a9aff0
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	column Product_Category
+		dataType: string
+		lineageTag: bc214ec4-ef1f-4f70-afc5-fa2bc20fbf11
+		sourceLineageTag: Product_Category
+		summarizeBy: none
+		sourceColumn: Product_Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column series
+		dataType: string
+		lineageTag: bcebb1c5-5a73-43db-815a-fd0f03f4f15e
+		sourceLineageTag: series
+		summarizeBy: none
+		sourceColumn: series
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecaster
+		dataType: string
+		lineageTag: 31f237f2-c16e-44b3-84ec-cc70f722a356
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: 66d4d2ef-d120-48e5-a1d2-178058e579b7
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	partition key_table = entity
+		mode: directLake
+		source
+			entityName: key_table
+			schemaName: Topline_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+

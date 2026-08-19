@@ -1,0 +1,8 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
+  "name": "48e0eb35aec920e66880",
+  "displayName": "PC x Region x FH Metrics",
+  "displayOption": "FitToPage",
+  "height": 720,
+  "width": 1280
+}

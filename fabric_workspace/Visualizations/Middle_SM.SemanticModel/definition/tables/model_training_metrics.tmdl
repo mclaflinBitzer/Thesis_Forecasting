@@ -1,0 +1,102 @@
+table model_training_metrics
+	lineageTag: 1ff1a5f5-b431-4f4a-a8ac-057a9ac4800d
+	sourceLineageTag: [Middle_Eval].[model_training_metrics]
+
+	column Forecaster
+		dataType: string
+		lineageTag: 38ebb046-4016-4db5-bc37-80f6fde62fe4
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: fa5d3326-6cf5-4553-a857-6b596285fb91
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column N
+		dataType: int64
+		formatString: 0
+		lineageTag: 7123ffae-e1c5-4a6f-8751-0a42edd6e85f
+		sourceLineageTag: N
+		summarizeBy: sum
+		sourceColumn: N
+
+		annotation SummarizationSetBy = Automatic
+
+	column ME
+		dataType: double
+		lineageTag: 01d1024c-b8a4-495c-b16e-a0e3b22db982
+		sourceLineageTag: ME
+		summarizeBy: sum
+		sourceColumn: ME
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MAE
+		dataType: double
+		lineageTag: 54b1f218-fa6a-4854-bfa0-702e72ca6f8e
+		sourceLineageTag: MAE
+		summarizeBy: sum
+		sourceColumn: MAE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column WAPE
+		dataType: double
+		lineageTag: 46580eed-a663-4b4e-955d-4c57ac1bc1ac
+		sourceLineageTag: WAPE
+		summarizeBy: sum
+		sourceColumn: WAPE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MASE
+		dataType: double
+		lineageTag: bd69b8e5-0085-4feb-91e2-833a2055de37
+		sourceLineageTag: MASE
+		summarizeBy: sum
+		sourceColumn: MASE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Training_End_Date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: e9a7a9a8-7d4b-4598-b610-edb48eb84f79
+		sourceLineageTag: Training_End_Date
+		summarizeBy: none
+		sourceColumn: Training_End_Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column identifier_col
+		dataType: string
+		lineageTag: 49359970-410b-4534-aba6-6367ae699420
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	partition model_training_metrics = entity
+		mode: directLake
+		source
+			entityName: model_training_metrics
+			schemaName: Middle_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+

@@ -1,0 +1,141 @@
+table eval_table
+	lineageTag: 9d09c178-bd00-4bf4-8708-e6416ee9f958
+	sourceLineageTag: [Topline_Eval].[eval_table]
+
+	column Product_Category
+		dataType: string
+		lineageTag: 695c2240-71f4-48d9-83d6-e078f810ab41
+		sourceLineageTag: Product_Category
+		summarizeBy: none
+		sourceColumn: Product_Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column series
+		dataType: string
+		lineageTag: 669751a6-226e-46bf-92d3-a78cad6fcdfc
+		sourceLineageTag: series
+		summarizeBy: none
+		sourceColumn: series
+
+		annotation SummarizationSetBy = Automatic
+
+	column Date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: cdc2c1f5-3775-4768-b963-7f90f14cf387
+		sourceLineageTag: Date
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecast_Horizon
+		dataType: int64
+		formatString: 0
+		lineageTag: fd790de9-ae28-439e-97f9-f59ef53e74d6
+		sourceLineageTag: Forecast_Horizon
+		summarizeBy: sum
+		sourceColumn: Forecast_Horizon
+
+		annotation SummarizationSetBy = Automatic
+
+	column Actuals
+		dataType: double
+		lineageTag: b1201ca0-85d1-4a29-bf2d-0a63b4ac095d
+		sourceLineageTag: Actuals
+		summarizeBy: sum
+		sourceColumn: Actuals
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Forecast
+		dataType: double
+		lineageTag: 18e9d2a8-5895-4523-9a6a-2a72566a10b7
+		sourceLineageTag: Forecast
+		summarizeBy: sum
+		sourceColumn: Forecast
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Forecaster
+		dataType: string
+		lineageTag: fe460edf-d880-40d7-aa4e-ffe212c80257
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: dba8d5b8-4eea-4be8-aeac-800185521c04
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column identifier_col
+		dataType: string
+		lineageTag: ee4108cc-079e-4a66-bb3f-8e322251c1d8
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecast_Error
+		dataType: double
+		lineageTag: 2adc8943-c1b8-4b8a-a553-489743edb80a
+		sourceLineageTag: Forecast_Error
+		summarizeBy: sum
+		sourceColumn: Forecast_Error
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Forecast_Abs_Error
+		dataType: double
+		lineageTag: 428374cb-8425-4621-8369-95b48b14ca99
+		sourceLineageTag: Forecast_Abs_Error
+		summarizeBy: sum
+		sourceColumn: Forecast_Abs_Error
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Baseline_Abs_Error
+		dataType: double
+		lineageTag: 01311e90-ed51-4afb-9e64-3d3a591396fd
+		sourceLineageTag: Baseline_Abs_Error
+		summarizeBy: sum
+		sourceColumn: Baseline_Abs_Error
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Training_End_Date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: f5059f8e-cde5-492a-ac28-a97043ee67e3
+		sourceLineageTag: Training_End_Date
+		summarizeBy: none
+		sourceColumn: Training_End_Date
+
+		annotation SummarizationSetBy = Automatic
+
+	partition eval_table = entity
+		mode: directLake
+		source
+			entityName: eval_table
+			schemaName: Topline_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
+  "name": "465b8ef050003a372aec",
+  "displayName": "Model FH Metrics",
+  "displayOption": "FitToPage",
+  "height": 720,
+  "width": 1280
+}

@@ -66,9 +66,9 @@ from pytorch_forecasting.data import GroupNormalizer
 
 ## default parameters / parameters to pass in from the pipeline
 run_tft = True
-Topline = False
-rerun_historical_forecasts = False
-driver_status = "Automated_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
+Topline = True
+rerun_historical_forecasts = True
+driver_status = "No_Drivers"    ## options: "No_Drivers", "Manual_Drivers", "Automated_Drivers" 
 
 # METADATA ********************
 
@@ -432,7 +432,7 @@ def objective(trial, train_dataset, validation_dataset):
         "hidden_continuous_size":
             trial.suggest_categorical(
                 "hidden_continuous_size",
-                [6,16]
+                [8,16]
                                 ### changing these parameters to reduce the search space and computation of optuna
                 # 8,
                 # 64,
@@ -778,7 +778,7 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
         for h in range(point_predictions.shape[1]):
             forecasted_rows.append({
                 **row.to_dict(),
-                "forecast_horizon": h + 1,
+                "Forecast_Horizon": h + 1,
                 "prediction": point_predictions[i, h]
             })
 
@@ -797,8 +797,8 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
 
     joined_forecasted_df = (
         joined_forecasted_df
-        .withColumn('End_Training_Date', col('Date'))
-        .withColumn('Date', add_months(col('Date'),col('forecast_horizon')))
+        .withColumn('Training_End_Date', col('Date'))
+        .withColumn('Date', add_months(col('Date'),col('Forecast_Horizon')))
         .withColumn("Forecaster", lit("TFT_Global"))
         .withColumn("Drivers_Used_Flag", lit(driver_status))
         .drop('time_idx')
@@ -818,7 +818,7 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
         )
         .rename(
             columns={
-                "Date": "End_Training_Date"
+                "Date": "Training_End_Date"
             }
         )
     )
@@ -914,7 +914,7 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
                 decoder_rows.append(
                     {
                         **row.to_dict(),
-                        "forecast_horizon": h + 1,
+                        "Forecast_Horizon": h + 1,
                         "variable": variable,
                         "importance": float(
                             decoder_values[i,h,v]
@@ -931,8 +931,8 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
         .groupby(
             [
                 *ACT_GRP_COLS,
-                "End_Training_Date",
-                "forecast_horizon"
+                "Training_End_Date",
+                "Forecast_Horizon"
             ]
         )["importance"]
         .transform(
@@ -987,7 +987,7 @@ def run_tft_forecasts(best_params, hist_df, forecast_df, time_varying_known_real
                 attention_rows.append(
                     {
                         **row.to_dict(),
-                        "forecast_horizon": h + 1,
+                        "Forecast_Horizon": h + 1,
                         "encoder_lag": lag + 1,
                         "attention_weight": float(
                             attention_values[i,h,lag]

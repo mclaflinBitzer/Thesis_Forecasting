@@ -1,0 +1,65 @@
+table key_table
+	lineageTag: 49640036-d091-48af-9c6e-8c238c77c436
+	sourceLineageTag: [Middle_Eval].[key_table]
+
+	column identifier_col
+		dataType: string
+		lineageTag: 6afc5689-864a-40d4-89a9-23b3a6b1a651
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	column Product_Category
+		dataType: string
+		lineageTag: 42191f73-29de-4191-b3ad-7776beb85220
+		sourceLineageTag: Product_Category
+		summarizeBy: none
+		sourceColumn: Product_Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column Region
+		dataType: string
+		lineageTag: 4506542f-a4a3-4a63-a05b-cb34bd8d1269
+		sourceLineageTag: Region
+		summarizeBy: none
+		sourceColumn: Region
+
+		annotation SummarizationSetBy = Automatic
+
+	column series
+		dataType: string
+		lineageTag: 53f7970e-c2b1-4d97-8479-b811ddb49af0
+		sourceLineageTag: series
+		summarizeBy: none
+		sourceColumn: series
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecaster
+		dataType: string
+		lineageTag: 0a63824d-c0db-4367-b8cd-89df12553207
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: 1fa8a14a-9a23-4100-84ef-be1bedd3cea0
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	partition key_table = entity
+		mode: directLake
+		source
+			entityName: key_table
+			schemaName: Middle_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+
