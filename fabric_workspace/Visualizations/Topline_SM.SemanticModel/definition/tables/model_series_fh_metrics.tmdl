@@ -1,0 +1,120 @@
+table model_series_fh_metrics
+	lineageTag: 8d22ecaf-9614-4446-afed-c188fbba387d
+	sourceLineageTag: [Topline_Eval].[model_series_fh_metrics]
+
+	column Product_Category
+		dataType: string
+		lineageTag: c9d7bdf4-6a77-4a75-b254-74146ab73241
+		sourceLineageTag: Product_Category
+		summarizeBy: none
+		sourceColumn: Product_Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column series
+		dataType: string
+		lineageTag: 474b663f-03ef-4966-8ed5-83231642bb3a
+		sourceLineageTag: series
+		summarizeBy: none
+		sourceColumn: series
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecaster
+		dataType: string
+		lineageTag: 5a5410aa-5ff2-4288-a51f-f8b5aa704e17
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecast_Horizon
+		dataType: int64
+		formatString: 0
+		lineageTag: c61d6c8c-989d-48b1-a2f3-e7a4e4c57cfe
+		sourceLineageTag: Forecast_Horizon
+		summarizeBy: sum
+		sourceColumn: Forecast_Horizon
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: e39286e2-b11e-4da5-8e3c-79380e175122
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column N
+		dataType: int64
+		formatString: 0
+		lineageTag: 00511431-4382-4932-994a-a4e780e5e2af
+		sourceLineageTag: N
+		summarizeBy: sum
+		sourceColumn: N
+
+		annotation SummarizationSetBy = Automatic
+
+	column ME
+		dataType: double
+		lineageTag: 7c58f0be-2df2-4144-9fe5-12342b69794d
+		sourceLineageTag: ME
+		summarizeBy: sum
+		sourceColumn: ME
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MAE
+		dataType: double
+		lineageTag: 8fd698e2-61ce-464a-8df9-154766ea9cc4
+		sourceLineageTag: MAE
+		summarizeBy: sum
+		sourceColumn: MAE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column WAPE
+		dataType: double
+		lineageTag: 946c496a-b59b-473d-99f4-6b0856c4138c
+		sourceLineageTag: WAPE
+		summarizeBy: sum
+		sourceColumn: WAPE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MASE
+		dataType: double
+		lineageTag: b1191e96-a686-4d8f-b87d-8f999fa26fef
+		sourceLineageTag: MASE
+		summarizeBy: sum
+		sourceColumn: MASE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column identifier_col
+		dataType: string
+		lineageTag: 86f73e27-3a93-4eea-b1c1-3d78f62dcfcd
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	partition model_series_fh_metrics = entity
+		mode: directLake
+		source
+			entityName: model_series_fh_metrics
+			schemaName: Topline_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+

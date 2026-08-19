@@ -1,0 +1,197 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "b1164d3809980e24a064",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 554.7864610522455,
+    "width": 640.3160404644666,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_metrics"
+                    }
+                  },
+                  "Property": "Forecaster"
+                }
+              },
+              "queryRef": "model_series_metrics.Forecaster",
+              "nativeQueryRef": "Forecaster",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_metrics"
+                    }
+                  },
+                  "Property": "Drivers_Used_Flag"
+                }
+              },
+              "queryRef": "model_series_metrics.Drivers_Used_Flag",
+              "nativeQueryRef": "Drivers_Used_Flag",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_metrics"
+                        }
+                      },
+                      "Property": "MAE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_metrics.MAE)",
+              "nativeQueryRef": "Average of MAE"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_metrics"
+                        }
+                      },
+                      "Property": "ME"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_metrics.ME)",
+              "nativeQueryRef": "Average of ME"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "Forecaster"
+              }
+            },
+            "direction": "Ascending"
+          },
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "Drivers_Used_Flag"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "21e3a8cade0ee9610612",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_metrics"
+              }
+            },
+            "Property": "Forecaster"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "2dc0e0029186aae112b9",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_metrics"
+              }
+            },
+            "Property": "Drivers_Used_Flag"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "f6a52b720e5a51dc92d4",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "MAE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "1262acaabd00db8a0c5a",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "ME"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
+  }
+}

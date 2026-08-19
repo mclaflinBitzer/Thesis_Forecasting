@@ -1,0 +1,102 @@
+table model_fh_metrics
+	lineageTag: d969fc51-c5c4-4abc-b421-db89c35506ac
+	sourceLineageTag: [Middle_Eval].[model_fh_metrics]
+
+	column Forecaster
+		dataType: string
+		lineageTag: a85f8276-c707-4634-918d-e288b9063535
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecast_Horizon
+		dataType: int64
+		formatString: 0
+		lineageTag: 123d9650-7b47-4ac1-a170-cd0fdd902647
+		sourceLineageTag: Forecast_Horizon
+		summarizeBy: sum
+		sourceColumn: Forecast_Horizon
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: 4b37de92-5357-4946-bd5b-d990f8694b2f
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column N
+		dataType: int64
+		formatString: 0
+		lineageTag: 2aeeebaf-890c-43cf-940d-7c4ce5971d93
+		sourceLineageTag: N
+		summarizeBy: sum
+		sourceColumn: N
+
+		annotation SummarizationSetBy = Automatic
+
+	column ME
+		dataType: double
+		lineageTag: 848d3e7f-07a2-4704-88fd-1e1f6eab18fd
+		sourceLineageTag: ME
+		summarizeBy: sum
+		sourceColumn: ME
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MAE
+		dataType: double
+		lineageTag: d009098f-a42f-4f2c-a821-87ad1f59d4e6
+		sourceLineageTag: MAE
+		summarizeBy: sum
+		sourceColumn: MAE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column WAPE
+		dataType: double
+		lineageTag: a177876f-37ac-4583-ba86-f5692bb7a78b
+		sourceLineageTag: WAPE
+		summarizeBy: sum
+		sourceColumn: WAPE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MASE
+		dataType: double
+		lineageTag: d88f4dbe-c565-4bd2-9c77-cae60c306091
+		sourceLineageTag: MASE
+		summarizeBy: sum
+		sourceColumn: MASE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column identifier_col
+		dataType: string
+		lineageTag: fd7da46d-a212-4efa-b856-190b248118e6
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	partition model_fh_metrics = entity
+		mode: directLake
+		source
+			entityName: model_fh_metrics
+			schemaName: Middle_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+

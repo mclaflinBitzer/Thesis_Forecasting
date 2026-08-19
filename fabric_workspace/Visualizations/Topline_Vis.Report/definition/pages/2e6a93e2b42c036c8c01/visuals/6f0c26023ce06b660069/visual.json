@@ -1,0 +1,155 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "6f0c26023ce06b660069",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 554.7864610522455,
+    "width": 640.3160404644666,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_training_metrics"
+                    }
+                  },
+                  "Property": "Training_End_Date"
+                }
+              },
+              "queryRef": "model_training_metrics.Training_End_Date",
+              "nativeQueryRef": "Training_End_Date",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_training_metrics"
+                        }
+                      },
+                      "Property": "MAE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_training_metrics.MAE)",
+              "nativeQueryRef": "Average of MAE"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_training_metrics"
+                        }
+                      },
+                      "Property": "ME"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_training_metrics.ME)",
+              "nativeQueryRef": "Average of ME"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_training_metrics"
+                  }
+                },
+                "Property": "Training_End_Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "0ed23e3599ecb8508a0b",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_training_metrics"
+              }
+            },
+            "Property": "Training_End_Date"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "f638cffe827ceca509a5",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_training_metrics"
+                  }
+                },
+                "Property": "MAE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "f48877f4597380c9b2be",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_training_metrics"
+                  }
+                },
+                "Property": "ME"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
+  }
+}

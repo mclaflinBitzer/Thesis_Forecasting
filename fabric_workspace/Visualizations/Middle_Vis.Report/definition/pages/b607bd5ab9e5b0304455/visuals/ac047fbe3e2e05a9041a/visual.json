@@ -1,0 +1,98 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "ac047fbe3e2e05a9041a",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 556.59048795552815,
+    "width": 1280.1581222977147,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "lineChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "monthly_agg"
+                    }
+                  },
+                  "Property": "Date"
+                }
+              },
+              "queryRef": "monthly_agg.Date",
+              "nativeQueryRef": "Date",
+              "active": true
+            }
+          ]
+        },
+        "Series": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "monthly_agg"
+                    }
+                  },
+                  "Property": "Forecaster"
+                }
+              },
+              "queryRef": "monthly_agg.Forecaster",
+              "nativeQueryRef": "Forecaster"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "monthly_agg"
+                        }
+                      },
+                      "Property": "Forecast"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(monthly_agg.Forecast)",
+              "nativeQueryRef": "Average of Forecast"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "monthly_agg"
+                  }
+                },
+                "Property": "Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

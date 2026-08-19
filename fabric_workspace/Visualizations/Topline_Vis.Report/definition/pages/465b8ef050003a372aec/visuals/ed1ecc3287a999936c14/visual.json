@@ -1,0 +1,160 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "ed1ecc3287a999936c14",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 554.7864610522455,
+    "width": 640.3160404644666,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_fh_metrics"
+                    }
+                  },
+                  "Property": "Forecast_Horizon"
+                }
+              },
+              "queryRef": "model_fh_metrics.Forecast_Horizon",
+              "nativeQueryRef": "Forecast_Horizon",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_fh_metrics"
+                        }
+                      },
+                      "Property": "MAE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_fh_metrics.MAE)",
+              "nativeQueryRef": "Average of MAE"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_fh_metrics"
+                        }
+                      },
+                      "Property": "ME"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_fh_metrics.ME)",
+              "nativeQueryRef": "Average of ME"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Aggregation": {
+                "Expression": {
+                  "Column": {
+                    "Expression": {
+                      "SourceRef": {
+                        "Entity": "model_fh_metrics"
+                      }
+                    },
+                    "Property": "MAE"
+                  }
+                },
+                "Function": 1
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "5acc0870ad0145c1d3b8",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_fh_metrics"
+              }
+            },
+            "Property": "Forecast_Horizon"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "f6452bc0ceedc5320977",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_fh_metrics"
+                  }
+                },
+                "Property": "MAE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "aae936b7759b55641406",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_fh_metrics"
+                  }
+                },
+                "Property": "ME"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "c3d8b863901a22b747e1",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 554.7864610522455,
+    "width": 640.3160404644666,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_fh_metrics"
+                    }
+                  },
+                  "Property": "Forecast_Horizon"
+                }
+              },
+              "queryRef": "model_series_fh_metrics.Forecast_Horizon",
+              "nativeQueryRef": "Forecast_Horizon",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_fh_metrics"
+                        }
+                      },
+                      "Property": "MAE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_fh_metrics.MAE)",
+              "nativeQueryRef": "Average of MAE"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_fh_metrics"
+                        }
+                      },
+                      "Property": "ME"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_fh_metrics.ME)",
+              "nativeQueryRef": "Average of ME"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Aggregation": {
+                "Expression": {
+                  "Column": {
+                    "Expression": {
+                      "SourceRef": {
+                        "Entity": "model_series_fh_metrics"
+                      }
+                    },
+                    "Property": "MAE"
+                  }
+                },
+                "Function": 1
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "5029757ce5c226accc4d",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_fh_metrics"
+              }
+            },
+            "Property": "Forecast_Horizon"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "c4023913c860b90dea13",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_fh_metrics"
+                  }
+                },
+                "Property": "MAE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "ff621004d887e59d0035",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_fh_metrics"
+                  }
+                },
+                "Property": "ME"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
+  }
+}

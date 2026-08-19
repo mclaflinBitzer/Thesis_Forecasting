@@ -1,0 +1,57 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "752345d9c0368d17507a",
+  "position": {
+    "x": 838,
+    "y": 565,
+    "z": 3001,
+    "height": 155,
+    "width": 441,
+    "tabOrder": 3001
+  },
+  "visual": {
+    "visualType": "listSlicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_metrics"
+                    }
+                  },
+                  "Property": "Drivers_Used_Flag"
+                }
+              },
+              "queryRef": "model_series_metrics.Drivers_Used_Flag",
+              "nativeQueryRef": "Drivers_Used_Flag",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "19b42bd0b54a0223019d",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_metrics"
+              }
+            },
+            "Property": "Drivers_Used_Flag"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

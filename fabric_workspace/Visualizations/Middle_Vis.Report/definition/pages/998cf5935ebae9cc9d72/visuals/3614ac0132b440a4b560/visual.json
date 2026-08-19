@@ -1,0 +1,149 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "3614ac0132b440a4b560",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 556.59048795552815,
+    "width": 1280.1581222977147,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "lineChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "monthly_agg"
+                    }
+                  },
+                  "Property": "Date"
+                }
+              },
+              "queryRef": "monthly_agg.Date",
+              "nativeQueryRef": "Date",
+              "active": true
+            }
+          ]
+        },
+        "Series": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "monthly_agg"
+                    }
+                  },
+                  "Property": "Forecaster"
+                }
+              },
+              "queryRef": "monthly_agg.Forecaster",
+              "nativeQueryRef": "Forecaster"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "monthly_agg"
+                        }
+                      },
+                      "Property": "Forecast"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(monthly_agg.Forecast)",
+              "nativeQueryRef": "Average of Forecast"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "monthly_agg"
+                  }
+                },
+                "Property": "Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "90a479444be23e53ac32",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "monthly_agg"
+              }
+            },
+            "Property": "Date"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "08522103d7ccda0ae077",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "monthly_agg"
+                  }
+                },
+                "Property": "Forecast"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "d146038dac526ea9e9dd",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "monthly_agg"
+              }
+            },
+            "Property": "Forecaster"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

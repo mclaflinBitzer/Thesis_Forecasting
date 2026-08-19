@@ -1,0 +1,64 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "4678f5b0e20622993de1",
+  "position": {
+    "x": 0,
+    "y": 566.32197706668876,
+    "z": 1,
+    "height": 154.29730512894815,
+    "width": 322.15920851099065,
+    "tabOrder": 1
+  },
+  "visual": {
+    "visualType": "listSlicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "monthly_agg"
+                    }
+                  },
+                  "Property": "Forecaster"
+                }
+              },
+              "queryRef": "monthly_agg.Forecaster",
+              "nativeQueryRef": "Forecaster",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "general": [
+        {
+          "properties": {}
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "2f6c9fe93edc0520d262",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "monthly_agg"
+              }
+            },
+            "Property": "Forecaster"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

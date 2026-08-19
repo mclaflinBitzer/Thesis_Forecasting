@@ -1,0 +1,197 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "9225894a0ce7c0a18496",
+  "position": {
+    "x": 640.92238007000208,
+    "y": 0,
+    "z": 1,
+    "height": 565.02367716697552,
+    "width": 639.23574222771254,
+    "tabOrder": 1
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_metrics"
+                    }
+                  },
+                  "Property": "Forecaster"
+                }
+              },
+              "queryRef": "model_series_metrics.Forecaster",
+              "nativeQueryRef": "Forecaster",
+              "active": true
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_metrics"
+                    }
+                  },
+                  "Property": "Drivers_Used_Flag"
+                }
+              },
+              "queryRef": "model_series_metrics.Drivers_Used_Flag",
+              "nativeQueryRef": "Drivers_Used_Flag",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_metrics"
+                        }
+                      },
+                      "Property": "MASE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_metrics.MASE)",
+              "nativeQueryRef": "Average of MASE"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_metrics"
+                        }
+                      },
+                      "Property": "WAPE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_metrics.WAPE)",
+              "nativeQueryRef": "Average of WAPE"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "Forecaster"
+              }
+            },
+            "direction": "Ascending"
+          },
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "Drivers_Used_Flag"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "03f9009c600b1bcd82dc",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_metrics"
+              }
+            },
+            "Property": "Forecaster"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "e21be50805499d400cbd",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_metrics"
+              }
+            },
+            "Property": "Drivers_Used_Flag"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "4be88441937010508030",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "MASE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "6ce435edc032a0ba39c4",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_metrics"
+                  }
+                },
+                "Property": "WAPE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
+  }
+}

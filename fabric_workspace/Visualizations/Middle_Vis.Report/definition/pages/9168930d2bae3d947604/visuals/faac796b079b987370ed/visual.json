@@ -1,0 +1,155 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "faac796b079b987370ed",
+  "position": {
+    "x": 629.11591517397574,
+    "y": 0,
+    "z": 1000,
+    "height": 568.39695285155449,
+    "width": 651.042207123739,
+    "tabOrder": 1000
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_training_metrics"
+                    }
+                  },
+                  "Property": "Training_End_Date"
+                }
+              },
+              "queryRef": "model_training_metrics.Training_End_Date",
+              "nativeQueryRef": "Training_End_Date",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_training_metrics"
+                        }
+                      },
+                      "Property": "MASE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_training_metrics.MASE)",
+              "nativeQueryRef": "Average of MASE"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_training_metrics"
+                        }
+                      },
+                      "Property": "WAPE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_training_metrics.WAPE)",
+              "nativeQueryRef": "Average of WAPE"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_training_metrics"
+                  }
+                },
+                "Property": "Training_End_Date"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "3d22ea0c4e0d2b9204dc",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_training_metrics"
+              }
+            },
+            "Property": "Training_End_Date"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "22bcbe540b88122d1b0b",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_training_metrics"
+                  }
+                },
+                "Property": "MASE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "d3e857dad713051c6b90",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_training_metrics"
+                  }
+                },
+                "Property": "WAPE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
+  }
+}

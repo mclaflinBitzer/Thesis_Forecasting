@@ -1,0 +1,97 @@
+table compiled_values
+	lineageTag: 11226adc-cc59-4705-be04-1f4ed07583c9
+	sourceLineageTag: [Topline_Eval].[compiled_values]
+
+	column Product_Category
+		dataType: string
+		lineageTag: 03cc61b1-3f76-4690-9649-db1ee0cd8cab
+		sourceLineageTag: Product_Category
+		summarizeBy: none
+		sourceColumn: Product_Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column series
+		dataType: string
+		lineageTag: 03ec5386-33cd-4b07-b012-82debdd64b74
+		sourceLineageTag: series
+		summarizeBy: none
+		sourceColumn: series
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecast_Horizon
+		dataType: int64
+		formatString: 0
+		lineageTag: 5a72b7d2-218c-4cc6-917a-5f82b0585527
+		sourceLineageTag: Forecast_Horizon
+		summarizeBy: sum
+		sourceColumn: Forecast_Horizon
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecast
+		dataType: double
+		lineageTag: 98a4a988-f174-478b-828c-1464a936f433
+		sourceLineageTag: Forecast
+		summarizeBy: sum
+		sourceColumn: Forecast
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Forecaster
+		dataType: string
+		lineageTag: a2cb7b69-c88b-4982-ba38-12253a2f58c6
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: 8883173b-7f60-4254-a59f-f22180020022
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column identifier_col
+		dataType: string
+		lineageTag: 9a300e3e-d3dd-43cb-9e3e-e8537ce98f63
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	column Training_End_Date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 45b41108-1d9f-4f54-a4cb-ebb2bf2a4b6a
+		sourceLineageTag: Training_End_Date
+		summarizeBy: none
+		sourceColumn: Training_End_Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column Date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 0fe74e35-4d65-4044-a7ce-c27412fcbd72
+		sourceLineageTag: Date
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	partition compiled_values = entity
+		mode: directLake
+		source
+			entityName: compiled_values
+			schemaName: Topline_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+

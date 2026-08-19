@@ -24,17 +24,6 @@
 # META   }
 # META }
 
-# CELL ********************
-
-# %pip install optuna
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
 # PARAMETERS CELL ********************
 
 # Parameters
@@ -64,17 +53,6 @@ print(driver_status)
 
 # CELL ********************
 
-import shap
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
 # Welcome to your new notebook
 import numpy as np
 from pyspark.sql import DataFrame, functions as F, Window
@@ -88,6 +66,7 @@ import builtins
 from functools import reduce
 from sklearn.metrics import mean_absolute_error
 import optuna
+import shap
 
 
 VALID_DRIVER_STATUS = ["No_Drivers", "Manual_Drivers", "Automated_Drivers"]
@@ -99,7 +78,7 @@ if driver_status not in VALID_DRIVER_STATUS:
 
 
 # ==========================================================
-# CONFIG — adjust to your setup
+# CONFIG
 # ==========================================================
 manual_features = "/lakehouse/default/Files/Driver_Analysis/Final_Feature_Selection/"
 automated_features = "/lakehouse/default/Files/Automated_Driver_Analysis/"
@@ -134,13 +113,12 @@ else:
 
 
 FORECAST_HORIZON = 18
-SEASONAL_PERIODS = 12
 MIN_TRAIN = 36
 STEP_SIZE = 3  # controls how many full model retrainings happen in the
                # walk-forward backtest below. Increase if too slow —
                # does not affect the always-on future forecast.
 TUNE_HOLDOUT_MONTHS = FORECAST_HORIZON
-N_OPTUNA_TRIALS = 30
+N_OPTUNA_TRIALS = 50
 OPTUNA_SEED = 42
 
 
@@ -644,7 +622,7 @@ def fit_xgboost_global(sdf: DataFrame) -> DataFrame:
 
 
     drivers_used_local = len(driver_cols) > 0
-    driver_status_col = lit("Y" if drivers_used_local else "N")
+    driver_status_col = lit(driver_status)
     indexers = fit_encoders(sdf)
     asof_sdf = build_asof_table(sdf.select(*ACT_GRP_COLS, 'Date', target_col))
     in_sample_asof = asof_sdf.filter(col(target_col).isNotNull())

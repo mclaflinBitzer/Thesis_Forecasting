@@ -38,7 +38,7 @@ from pyspark.sql.window import Window
 # PARAMETERS CELL ********************
 
 ## Parameters to set from the pipeline
-Topline = False
+Topline = True
 
 # METADATA ********************
 
@@ -383,7 +383,18 @@ forecasts = forecasts.withColumn('forecast_v2', lag(col('forecast'),12).over(t_w
 forecasts = forecasts.withColumn('forecast_final', coalesce(col('forecast'),col('forecast_v2')))
 forecasts = forecasts.drop('forecast','forecast_v2').withColumnRenamed('forecast_final','forecast')
 
-forecasts.write.parquet(Seasonal_Baseline_dir)
+forecasts = (
+    forecasts
+    .withColumn("Forecaster", lit("Seasonal_Baseline"))
+    .withColumn("Drivers_Used_Flag", lit("No_Drivers"))
+    .withColumnsRenamed({
+        "training_end_date": "Training_End_Date",
+        "forecast_horizon": "Forecast_Horizon",
+        'forecast': "Forecast"
+    })
+)
+
+forecasts.write.mode('overwrite').parquet(Seasonal_Baseline_dir)
 
 # METADATA ********************
 

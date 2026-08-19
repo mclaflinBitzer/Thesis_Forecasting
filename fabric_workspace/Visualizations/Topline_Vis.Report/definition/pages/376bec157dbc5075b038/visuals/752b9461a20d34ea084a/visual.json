@@ -1,0 +1,160 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "752b9461a20d34ea084a",
+  "position": {
+    "x": 640,
+    "y": 0,
+    "z": 3000,
+    "height": 555,
+    "width": 639,
+    "tabOrder": 3000
+  },
+  "visual": {
+    "visualType": "clusteredColumnChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_fh_metrics"
+                    }
+                  },
+                  "Property": "Forecast_Horizon"
+                }
+              },
+              "queryRef": "model_series_fh_metrics.Forecast_Horizon",
+              "nativeQueryRef": "Forecast_Horizon",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_fh_metrics"
+                        }
+                      },
+                      "Property": "MASE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_fh_metrics.MASE)",
+              "nativeQueryRef": "Average of MASE"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "model_series_fh_metrics"
+                        }
+                      },
+                      "Property": "WAPE"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Sum(model_series_fh_metrics.WAPE)",
+              "nativeQueryRef": "Average of WAPE"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Aggregation": {
+                "Expression": {
+                  "Column": {
+                    "Expression": {
+                      "SourceRef": {
+                        "Entity": "model_series_fh_metrics"
+                      }
+                    },
+                    "Property": "MASE"
+                  }
+                },
+                "Function": 1
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "acd549ecc06e0945b2b0",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_fh_metrics"
+              }
+            },
+            "Property": "Forecast_Horizon"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "047d8908247cdd701800",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_fh_metrics"
+                  }
+                },
+                "Property": "MASE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "67b59027c9e8203ac4e0",
+        "field": {
+          "Aggregation": {
+            "Expression": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "model_series_fh_metrics"
+                  }
+                },
+                "Property": "WAPE"
+              }
+            },
+            "Function": 1
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
+  }
+}

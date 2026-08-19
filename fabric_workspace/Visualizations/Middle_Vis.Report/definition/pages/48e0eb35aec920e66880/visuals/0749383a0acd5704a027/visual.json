@@ -1,0 +1,64 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.11.0/schema.json",
+  "name": "0749383a0acd5704a027",
+  "position": {
+    "x": 0,
+    "y": 569.88923203623631,
+    "z": 3000,
+    "height": 150.11076796376364,
+    "width": 320.46119003500104,
+    "tabOrder": 3000
+  },
+  "visual": {
+    "visualType": "listSlicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "model_series_fh_metrics"
+                    }
+                  },
+                  "Property": "Product_Category"
+                }
+              },
+              "queryRef": "model_series_fh_metrics.Product_Category",
+              "nativeQueryRef": "Product_Category",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "general": [
+        {
+          "properties": {}
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "aeb4056371e749e240dc",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "model_series_fh_metrics"
+              }
+            },
+            "Property": "Product_Category"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

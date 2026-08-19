@@ -1,0 +1,92 @@
+table model_metrics
+	lineageTag: 441dfef1-a8ff-4f59-ae77-d82fe3688b4d
+	sourceLineageTag: [Middle_Eval].[model_metrics]
+
+	column Forecaster
+		dataType: string
+		lineageTag: f69832de-0b7f-4e14-81ba-7f8d10ef29bc
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: 0c882a39-8c5b-4c3d-b247-81b6c62fc7da
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column N
+		dataType: int64
+		formatString: 0
+		lineageTag: 07bf95d8-b852-4707-a959-453697e78afa
+		sourceLineageTag: N
+		summarizeBy: sum
+		sourceColumn: N
+
+		annotation SummarizationSetBy = Automatic
+
+	column ME
+		dataType: double
+		lineageTag: 19c1602d-0e55-431a-beb8-ff9290c89418
+		sourceLineageTag: ME
+		summarizeBy: sum
+		sourceColumn: ME
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MAE
+		dataType: double
+		lineageTag: 7066f0b0-d207-40a2-a520-a0d1c585a4f7
+		sourceLineageTag: MAE
+		summarizeBy: sum
+		sourceColumn: MAE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column WAPE
+		dataType: double
+		lineageTag: 276296f8-c922-4047-b799-9c001df5dfac
+		sourceLineageTag: WAPE
+		summarizeBy: sum
+		sourceColumn: WAPE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column MASE
+		dataType: double
+		lineageTag: 00f07237-8e6c-4ec7-bc8e-0e7b2bc7420b
+		sourceLineageTag: MASE
+		summarizeBy: sum
+		sourceColumn: MASE
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column identifier_col
+		dataType: string
+		lineageTag: 1f4649ec-68b2-41be-95ae-736380fa30f4
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	partition model_metrics = entity
+		mode: directLake
+		source
+			entityName: model_metrics
+			schemaName: Middle_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+

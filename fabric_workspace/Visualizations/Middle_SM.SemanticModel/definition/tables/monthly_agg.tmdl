@@ -1,0 +1,86 @@
+table monthly_agg
+	lineageTag: 61d0eec7-fcf7-4bcc-a361-98a53af42122
+	sourceLineageTag: [Middle_Eval].[monthly_agg]
+
+	column Product_Category
+		dataType: string
+		lineageTag: a841e7a4-54ad-4c3a-9d22-62538ef4eecc
+		sourceLineageTag: Product_Category
+		summarizeBy: none
+		sourceColumn: Product_Category
+
+		annotation SummarizationSetBy = Automatic
+
+	column Region
+		dataType: string
+		lineageTag: 47d311c3-3464-4ce4-8472-79be55c28140
+		sourceLineageTag: Region
+		summarizeBy: none
+		sourceColumn: Region
+
+		annotation SummarizationSetBy = Automatic
+
+	column series
+		dataType: string
+		lineageTag: 1229722c-aaed-4516-b468-0394a0290b85
+		sourceLineageTag: series
+		summarizeBy: none
+		sourceColumn: series
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecaster
+		dataType: string
+		lineageTag: 3ebcad60-dab3-46fb-9481-15a32c731189
+		sourceLineageTag: Forecaster
+		summarizeBy: none
+		sourceColumn: Forecaster
+
+		annotation SummarizationSetBy = Automatic
+
+	column Drivers_Used_Flag
+		dataType: string
+		lineageTag: d81dc5f1-1350-42b5-b083-18e1a47a2702
+		sourceLineageTag: Drivers_Used_Flag
+		summarizeBy: none
+		sourceColumn: Drivers_Used_Flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column Forecast
+		dataType: double
+		lineageTag: 1221dbfd-f6cc-4295-86f7-50403cc2f6c0
+		sourceLineageTag: Forecast
+		summarizeBy: sum
+		sourceColumn: Forecast
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 35404dfa-fabf-4763-9981-fa286ba5b3d5
+		sourceLineageTag: Date
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column identifier_col
+		dataType: string
+		lineageTag: b625b94b-c279-42ec-bbdc-e53fddca01c9
+		sourceLineageTag: identifier_col
+		summarizeBy: none
+		sourceColumn: identifier_col
+
+		annotation SummarizationSetBy = Automatic
+
+	partition monthly_agg = entity
+		mode: directLake
+		source
+			entityName: monthly_agg
+			schemaName: Middle_Eval
+			expressionSource: 'DirectLake - Sales_Forecasting'
+
