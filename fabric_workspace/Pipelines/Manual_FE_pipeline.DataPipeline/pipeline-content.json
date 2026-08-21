@@ -1,0 +1,32 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "22d94841-dd43-8b47-438e-b96c6039c405",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "Topline": {
+              "value": true,
+              "type": "bool"
+            },
+            "driver_status": {
+              "value": "Manual_Drivers",
+              "type": "string"
+            }
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Manual_FE",
+        "dependsOn": []
+      }
+    ]
+  }
+}

@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
     "type": "DataPipeline",
-    "displayName": "Driver_FE_pipeline"
+    "displayName": "Production_Forecasting_Pipeline"
   },
   "config": {
     "version": "2.0",
-    "logicalId": "c9651a86-7e60-9898-44f5-d785c7dafb22"
+    "logicalId": "c4bf494d-7c35-b086-4f8c-ac06b042e54a"
   }
 }

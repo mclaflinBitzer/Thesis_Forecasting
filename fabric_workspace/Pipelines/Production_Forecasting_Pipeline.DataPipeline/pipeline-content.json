@@ -1,0 +1,476 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "cda269f5-7d8f-8008-400d-56c78c932613",
+          "workspaceId": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Driver_Ingestion",
+        "dependsOn": []
+      },
+      {
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "92af8124-b330-bb76-43b0-c3f9398101cf",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "Topline": {
+              "value": {
+                "value": "@pipeline().parameters.Topline",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "driver_status": {
+              "value": {
+                "value": "@pipeline().parameters.driver_status",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Raw_Actuals_Processing",
+        "dependsOn": [
+          {
+            "activity": "Driver_Ingestion",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@equals(pipeline().parameters.driver_status, 'Automated_Drivers')",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "TridentNotebook",
+              "typeProperties": {
+                "notebookId": "d3529957-4ce2-9418-448d-0cd86f14c565",
+                "workspaceId": "00000000-0000-0000-0000-000000000000",
+                "parameters": {
+                  "Topline": {
+                    "value": {
+                      "value": "@pipeline().parameters.Topline",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "driver_status": {
+                    "value": {
+                      "value": "@pipeline().parameters.driver_status",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  }
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Automated_FE",
+              "dependsOn": []
+            }
+          ],
+          "ifFalseActivities": []
+        },
+        "name": "If_Automated_Drivers",
+        "dependsOn": [
+          {
+            "activity": "Raw_Actuals_Processing",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "484495b5-36d3-baac-412b-2c81fe3ca775",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "Topline": {
+              "value": {
+                "value": "@pipeline().parameters.Topline",
+                "type": "Expression"
+              },
+              "type": "bool"
+            },
+            "driver_status": {
+              "value": {
+                "value": "@pipeline().parameters.driver_status",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Seasonal_Baseline",
+        "dependsOn": [
+          {
+            "activity": "If_Automated_Drivers",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Office365Email",
+        "typeProperties": {
+          "body": "<p>@pipeline().PipelineName - Failed</p>\n<p>@{pipeline().Pipeline}</p>\n<p>@{pipeline().DataFactory}</p>\n<p></p>",
+          "to": "matthew.claflin@bitzer.de",
+          "subject": "FAILED FORECASTING PIPELINE"
+        },
+        "externalReferences": {
+          "connection": "b3b429e8-8ede-4b7a-bd40-9cd7d936a5a2"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Pipeline_Failure_Email",
+        "dependsOn": [
+          {
+            "activity": "Driver_Ingestion",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          },
+          {
+            "activity": "Raw_Actuals_Processing",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          },
+          {
+            "activity": "If_Automated_Drivers",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          },
+          {
+            "activity": "Seasonal_Baseline",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          },
+          {
+            "activity": "If_Classical_Forecasting",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          },
+          {
+            "activity": "If_ML_Forecasting",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          },
+          {
+            "activity": "IF_DL_Forecasting",
+            "dependencyConditions": [
+              "Failed"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@or(\n    or(\n        pipeline().parameters.ets_run,\n        pipeline().parameters.sarimax_run\n    ),\n    or(\n        pipeline().parameters.arimax_run,\n        pipeline().parameters.prophet_run\n    )\n)",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "TridentNotebook",
+              "typeProperties": {
+                "notebookId": "60611865-6ec6-83f3-4a2e-229375451d48",
+                "workspaceId": "00000000-0000-0000-0000-000000000000",
+                "parameters": {
+                  "Topline": {
+                    "value": {
+                      "value": "@pipeline().parameters.Topline",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "rerun_historical_forecasts": {
+                    "value": {
+                      "value": "@pipeline().parameters.rerun_historical_forecasts",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "ets_run": {
+                    "value": {
+                      "value": "@pipeline().parameters.ets_run",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "arimax_run": {
+                    "value": {
+                      "value": "@pipeline().parameters.arimax_run",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "sarimax_run": {
+                    "value": {
+                      "value": "@pipeline().parameters.sarimax_run",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "prophet_run": {
+                    "value": {
+                      "value": "@pipeline().parameters.prophet_run",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "driver_status": {
+                    "value": {
+                      "value": "@pipeline().parameters.driver_status",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  }
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Classical_Forecasting",
+              "dependsOn": []
+            }
+          ],
+          "ifFalseActivities": []
+        },
+        "name": "If_Classical_Forecasting",
+        "dependsOn": [
+          {
+            "activity": "Seasonal_Baseline",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@pipeline().parameters.run_xgboost",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "TridentNotebook",
+              "typeProperties": {
+                "notebookId": "54e5b5d6-013e-a73c-4a60-820716074c12",
+                "workspaceId": "00000000-0000-0000-0000-000000000000",
+                "parameters": {
+                  "Topline": {
+                    "value": {
+                      "value": "@pipeline().parameters.Topline",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "rerun_historical_forecasts": {
+                    "value": {
+                      "value": "@pipeline().parameters.rerun_historical_forecasts",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "driver_status": {
+                    "value": {
+                      "value": "@pipeline().parameters.driver_status",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "run_xgboost": {
+                    "value": {
+                      "value": "@pipeline().parameters.run_xgboost",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  }
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "ML_Forecasting",
+              "dependsOn": []
+            }
+          ],
+          "ifFalseActivities": []
+        },
+        "name": "If_ML_Forecasting",
+        "dependsOn": [
+          {
+            "activity": "If_Classical_Forecasting",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@pipeline().parameters.tft_run",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "TridentNotebook",
+              "typeProperties": {
+                "notebookId": "4a510f3a-0d3d-a552-4858-76e3489dd724",
+                "workspaceId": "00000000-0000-0000-0000-000000000000",
+                "parameters": {
+                  "run_tft": {
+                    "value": {
+                      "value": "@pipeline().parameters.tft_run",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "Topline": {
+                    "value": {
+                      "value": "@pipeline().parameters.Topline",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "rerun_historical_forecasts": {
+                    "value": {
+                      "value": "@pipeline().parameters.rerun_historical_forecasts",
+                      "type": "Expression"
+                    },
+                    "type": "bool"
+                  },
+                  "driver_status": {
+                    "value": {
+                      "value": "@pipeline().parameters.driver_status",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  }
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "DL_Forecasting",
+              "dependsOn": []
+            }
+          ],
+          "ifFalseActivities": []
+        },
+        "name": "IF_DL_Forecasting",
+        "dependsOn": [
+          {
+            "activity": "If_ML_Forecasting",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "Topline": {
+        "type": "Bool",
+        "defaultValue": true
+      },
+      "driver_status": {
+        "type": "String",
+        "defaultValue": "No_Drivers"
+      },
+      "rerun_historical_forecasts": {
+        "type": "Bool",
+        "defaultValue": false
+      },
+      "arimax_run": {
+        "type": "Bool",
+        "defaultValue": false
+      },
+      "ets_run": {
+        "type": "Bool",
+        "defaultValue": false
+      },
+      "sarimax_run": {
+        "type": "Bool",
+        "defaultValue": false
+      },
+      "prophet_run": {
+        "type": "Bool",
+        "defaultValue": false
+      },
+      "run_xgboost": {
+        "type": "Bool",
+        "defaultValue": false
+      },
+      "tft_run": {
+        "type": "Bool",
+        "defaultValue": false
+      }
+    }
+  }
+}

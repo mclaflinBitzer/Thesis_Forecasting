@@ -38,6 +38,44 @@ from pyspark.sql.window import Window
 
 # MARKDOWN ********************
 
+# ## Running the initial ingestion notebooks
+
+# CELL ********************
+
+notebooks = notebookutils.notebook.list()
+
+drv_notebooks = [
+    {
+        "name": nb.displayName,
+        "id": nb.id
+    }
+    for nb in notebooks
+    if nb.displayName.startswith("DRV")
+]
+drv_notebooks
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+for nb in drv_notebooks:
+    print(f"Running {nb['name']}")
+    mssparkutils.notebook.run(nb['name'],3600)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
 # #### Extracting all tables within the lakehouse
 
 # CELL ********************

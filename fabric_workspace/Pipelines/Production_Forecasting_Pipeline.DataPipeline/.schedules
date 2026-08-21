@@ -1,0 +1,75 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/schedules/1.0.0/schema.json",
+  "schedules": [
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-20T00:00:00",
+        "endDateTime": "2027-08-20T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "17:25"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 20
+        }
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": false,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "No_Drivers",
+          "type": "Text"
+        },
+        {
+          "name": "tft_run",
+          "value": true,
+          "type": "Boolean"
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "jobType": "Execute",
+      "configuration": {
+        "type": "Monthly",
+        "startDateTime": "2026-08-20T00:00:00",
+        "endDateTime": "2027-08-20T00:00:00",
+        "localTimeZoneId": "Romance Standard Time",
+        "times": [
+          "15:45"
+        ],
+        "recurrence": 1,
+        "occurrence": {
+          "occurrenceType": "DayOfMonth",
+          "dayOfMonth": 20
+        }
+      },
+      "parameters": [
+        {
+          "name": "Topline",
+          "value": true,
+          "type": "Boolean"
+        },
+        {
+          "name": "driver_status",
+          "value": "Manual_Drivers",
+          "type": "Text"
+        },
+        {
+          "name": "tft_run",
+          "value": true,
+          "type": "Boolean"
+        }
+      ]
+    }
+  ]
+}
