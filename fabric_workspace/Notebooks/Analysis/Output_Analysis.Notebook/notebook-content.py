@@ -25,6 +25,8 @@
 from pyspark.sql.functions import *
 from functools import reduce
 from pyspark.sql.types import *
+import pandas as pd
+from pyspark.sql.window import Window
 
 # METADATA ********************
 
@@ -243,7 +245,7 @@ def calculate_metrics(df, group_cols):
         .groupBy(*group_cols)
         .agg(
             count("*").alias("N"),
-            avg("Forecast_Error").alias("ME"),
+            (avg("Forecast_Error")*-1).alias("ME"),
             avg("Forecast_Abs_Error").alias("MAE"),
             sum("Forecast_Abs_Error").alias("Forecast_Abs_Error_Sum"),
             sum(abs(col("Actuals"))).alias("Actual_Sum"),
@@ -507,6 +509,551 @@ model_series_fh_metrics.write.mode('overwrite').saveAsTable(output_table+'model_
 #         .groupBy('identifier_col','Date')
 #         .agg(avg('Forecast').alias('Forecast'))
 #         )
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## Driver Impact Analysis  
+
+# CELL ********************
+
+base_drv_dir = 'abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Forecasting'
+if Topline:
+    base_drv_dir = base_drv_dir + '/Topline/'
+else: 
+    base_drv_dir = base_drv_dir + '/Middle/'  
+
+automated_drv_dir = base_drv_dir + 'Automated_Drivers/'
+manual_drv_dir = base_drv_dir + 'Manual_Drivers/'
+
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### ARIMAX
+
+
+# CELL ********************
+
+def arimax_drv(drv_dir):
+    arimax_auto = spark.createDataFrame(pd.read_parquet(drv_dir + 'Arimax_Output.parquet'))
+    max_training_date = arimax_auto.agg(max('Training_End_Date').alias('max_training_date')).collect()[0]['max_training_date']
+    arimax_auto = arimax_auto.filter(col('Training_End_Date')==max_training_date)
+
+    drivers_df = (
+        arimax_auto
+        .select(
+            "Product_Category",
+            "series",
+            "Training_End_Date",
+            "Forecaster",
+            "Drivers_Used_Flag",
+            explode(
+                arrays_zip(
+                    "Driver_STDDEV_Coefficients",
+                    "Driver_Impacts"
+                )
+            ).alias("driver")
+        )
+        .select(
+            "Product_Category",
+            "series",
+            "Training_End_Date",
+            "Forecaster",
+            "Drivers_Used_Flag",
+            col("driver.Driver_STDDEV_Coefficients._1").alias("Driver"),
+            col("driver.Driver_STDDEV_Coefficients._2").alias("STDDEV_Coefficient"),
+            col("driver.Driver_Impacts._2").alias("Driver_Impact")
+        )
+    )
+
+    ## selection based on Topline/Middle for driver
+    drv_item = 0 if Topline else 1
+
+    ## filtering for the best version of the driver instead of taking all versions (lags and other)
+    w_drv = Window().partitionBy('series','DRV').orderBy(desc(abs('Driver_Impact')))
+    temp = (
+        drivers_df
+        .withColumn('DRV', split(col('Driver'), "__").getItem(drv_item))
+        .withColumn('drv_rank', row_number().over(w_drv))
+        .filter(col('drv_rank')==1)
+    )
+
+    ## filtering to take the top 5 drivers per series
+    w_series = Window().partitionBy('series').orderBy(desc(abs("Driver_Impact")))
+    arimax_final = (
+        temp
+        .withColumn('series_drv_rank', row_number().over(w_series))
+        .filter(col('series_drv_rank')<=5)
+    )
+    return arimax_final
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+arimax_auto_final = arimax_drv(automated_drv_dir)
+display(arimax_auto_final.limit(3))
+arimax_manual_final = arimax_drv(manual_drv_dir)
+display(arimax_manual_final.limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### SARIMAX
+
+# CELL ********************
+
+def sarimax_drv(drv_dir):
+    sarimax_auto = spark.createDataFrame(pd.read_parquet(drv_dir + 'Sarimax_output.parquet'))
+    max_training_date = sarimax_auto.agg(max('Training_End_Date').alias('max_training_date')).collect()[0]['max_training_date']
+    sarimax_auto = sarimax_auto.filter(col('Training_End_Date')==max_training_date)
+
+    drivers_df = (
+        sarimax_auto
+        .select(
+            "Product_Category",
+            "series",
+            "Training_End_Date",
+            "Forecaster",
+            "Drivers_Used_Flag",
+            explode(
+                arrays_zip(
+                    "Driver_STDDEV_Coefficients",
+                    "Driver_Impacts"
+                )
+            ).alias("driver")
+        )
+        .select(
+            "Product_Category",
+            "series",
+            "Training_End_Date",
+            "Forecaster",
+            "Drivers_Used_Flag",
+            col("driver.Driver_STDDEV_Coefficients._1").alias("Driver"),
+            col("driver.Driver_STDDEV_Coefficients._2").alias("STDDEV_Coefficient"),
+            col("driver.Driver_Impacts._2").alias("Driver_Impact")
+        )
+    )
+
+    ## selection based on Topline/Middle for driver
+    drv_item = 0 if Topline else 1
+
+    ## filtering for the best version of the driver instead of taking all versions (lags and other)
+    w_drv = Window().partitionBy('series','DRV').orderBy(desc(abs('Driver_Impact')))
+    temp = (
+        drivers_df
+        .withColumn('DRV', split(col('Driver'), "__").getItem(drv_item))
+        .withColumn('drv_rank', row_number().over(w_drv))
+        .filter(col('drv_rank')==1)
+    )
+
+    ## filtering to take the top 5 drivers per series
+    w_series = Window().partitionBy('series').orderBy(desc(abs("Driver_Impact")))
+    sarimax_final = (
+        temp
+        .withColumn('series_drv_rank', row_number().over(w_series))
+        .filter(col('series_drv_rank')<=5)
+    )
+    return sarimax_final
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+sarimax_auto_final = sarimax_drv(automated_drv_dir)
+display(sarimax_auto_final.limit(1))
+
+sarimax_manual_final = sarimax_drv(manual_drv_dir)
+display(sarimax_manual_final.limit(1))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### Prophet
+
+# CELL ********************
+
+def prophet_drv(drv_dir):
+    prophet_auto = spark.createDataFrame(pd.read_parquet(drv_dir + 'Prophet_output.parquet'))
+    max_training_date = prophet_auto.agg(max('Training_End_Date').alias('max_training_date')).collect()[0]['max_training_date']
+    prophet_auto = prophet_auto.filter(col('Training_End_Date')==max_training_date)
+
+    drivers_df = (
+        prophet_auto
+        .select(
+            "Product_Category",
+            "series",
+            "Training_End_Date",
+            "Forecaster",
+            "Drivers_Used_Flag",
+            explode(
+                arrays_zip(
+                    "Driver_STDDEV_Coefficients",
+                    "Driver_Impacts"
+                )
+            ).alias("driver")
+        )
+        .select(
+            "Product_Category",
+            "series",
+            "Training_End_Date",
+            "Forecaster",
+            "Drivers_Used_Flag",
+            col("driver.Driver_STDDEV_Coefficients._1").alias("Driver"),
+            col("driver.Driver_STDDEV_Coefficients._2").alias("STDDEV_Coefficient"),
+            col("driver.Driver_Impacts._2").alias("Driver_Impact")
+        )
+    )
+
+    ## selection based on Topline/Middle for driver
+    drv_item = 0 if Topline else 1
+
+    ## filtering for the best version of the driver instead of taking all versions (lags and other)
+    w_drv = Window().partitionBy('series','DRV').orderBy(desc(abs('Driver_Impact')))
+    temp = (
+        drivers_df
+        .withColumn('DRV', split(col('Driver'), "__").getItem(drv_item))
+        .withColumn('drv_rank', row_number().over(w_drv))
+        .filter(col('drv_rank')==1)
+    )
+
+    ## filtering to take the top 5 drivers per series
+    w_series = Window().partitionBy('series').orderBy(desc(abs("Driver_Impact")))
+    prophet_final = (
+        temp
+        .withColumn('series_drv_rank', row_number().over(w_series))
+        .filter(col('series_drv_rank')<=5)
+    )
+    return prophet_final
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+prophet_automated_drv = prophet_drv(automated_drv_dir)
+display(prophet_automated_drv.limit(1))
+
+prophet_manual_drv = prophet_drv(manual_drv_dir)
+display(prophet_manual_drv.limit(1))
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### XGBoost
+
+# CELL ********************
+
+def xgb_drv(drv_dir):
+    xgboost_auto = spark.createDataFrame(pd.read_parquet(drv_dir + 'XGBoost_SHAP_FORECAST.parquet'))
+
+    for c in xgboost_auto.columns:
+        xgboost_auto = xgboost_auto.withColumnRenamed(c, c.replace(".", "_"))
+
+    drv_cols = []
+    fixed_cols = ['Product_Category_idx', 'series_idx', 'lag_1', 'lag_2', 'lag_3', 'lag_6', 'lag_12',
+                'lag_18', 'roll_mean_3', 'roll_mean_6', 'roll_mean_12', 'roll_std_3', 'roll_std_6', 'roll_std_12',
+                'month', 'quarter', 'year', 'month_sin', 'month_cos', 'Forecast_Horizon', 'Product_Category', 'series',
+                'Region', 'Region_idx']
+    
+    for cols in xgboost_auto.columns:
+        if cols not in drv_cols and cols not in fixed_cols:
+            drv_cols.append(cols)
+
+    id_cols = ['series', 'Forecast_Horizon']
+    if not Topline:
+        id_cols.append("Region")
+
+    ## selection based on Topline/Middle for driver
+    drv_item = 0 if Topline else 1
+
+    xgb_auto_unpivot = (
+        xgboost_auto
+        .unpivot(
+            ids=id_cols,
+            values=drv_cols,
+            variableColumnName="Driver",
+            valueColumnName="SHAP_Value"
+        )
+    )
+    xgb_auto_unpivot = (
+        xgb_auto_unpivot
+        .groupBy('series','Driver')
+        .agg(avg('SHAP_Value').alias('SHAP_Value'))
+        .withColumn("DRV", split(col('Driver'), "__").getItem(drv_item))
+    )
+
+
+
+    ## filtering for the best version of the driver instead of taking all versions (lags and other)
+    w_drv = Window().partitionBy('series','DRV').orderBy(desc(abs('SHAP_Value')))
+    temp = (
+        xgb_auto_unpivot
+        .withColumn('drv_rank', row_number().over(w_drv))
+        .filter(col('drv_rank')==1)
+    )
+
+    ## filtering to take the top 5 drivers per series
+    w_series = Window().partitionBy('series').orderBy(desc(abs("SHAP_Value")))
+    xgb_final = (
+        temp
+        .withColumn('series_drv_rank', row_number().over(w_series))
+        .filter(col('series_drv_rank')<=5)
+    )
+
+    return xgb_final
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+xgb_auto_drv = xgb_drv(automated_drv_dir).withColumn('Drivers_Used_Flag', lit('Automated_Drivers'))
+display(xgb_auto_drv.limit(1))
+
+xgb_manual_drv = xgb_drv(manual_drv_dir).withColumn("Drivers_Used_Flag", lit("Manual_Drivers"))
+display(xgb_manual_drv.limit(1))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# #### TFT
+
+# CELL ********************
+
+def tft_drv(drv_dir):
+    tft_auto = spark.createDataFrame(pd.read_parquet(drv_dir + 'TFT_decoder_Output.parquet'))
+    max_training_date = tft_auto.agg(max('Training_End_Date').alias('max_training_date')).collect()[0]['max_training_date']
+    tft_auto = (
+        tft_auto
+        .filter(col('Training_End_Date')==max_training_date)
+        .groupBy('series', 'feature')
+        .agg(
+            avg('importance').alias('importance'),
+            avg('importance_pct').alias('importance_pct')
+        )
+        .withColumnRenamed('feature','Driver')
+    )
+
+
+    if Topline:
+        tft_auto = tft_auto.withColumn('DRV', col('Driver'))
+    else:
+        tft_auto = tft_auto.withColumn("DRV", split(col('Driver'), "__").getItem(1))
+
+    ## filtering for the best version of the driver instead of taking all versions (lags and other)
+    w_drv = Window().partitionBy('series','DRV').orderBy(desc(abs('importance_pct')))
+    temp = (
+        tft_auto
+        .withColumn('drv_rank', row_number().over(w_drv))
+        .filter(col('drv_rank')==1)
+    )
+
+    ## filtering to take the top 5 drivers per series
+    w_series = Window().partitionBy('series').orderBy(desc(abs("importance_pct")))
+    tft_final = (
+        temp
+        .withColumn('series_drv_rank', row_number().over(w_series))
+        .filter(col('series_drv_rank')<=5)
+    )
+    return tft_final
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+tft_auto_drv = tft_drv(automated_drv_dir).withColumn('Drivers_Used_Flag', lit('Automated_Drivers'))
+display(tft_auto_drv.limit(1))
+
+tft_manual_drv = tft_drv(manual_drv_dir).withColumn('Drivers_Used_Flag', lit('Manual_Drivers'))
+display(tft_manual_drv.limit(1))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ### Joining DFs
+
+# CELL ********************
+
+def join_dfs(arimax, sarimax, prophet, xgb, tft, level):
+    auto_drv_final =(
+        arimax.select('series','Forecaster','Drivers_Used_Flag', 'Driver','DRV')
+        .unionByName(
+            sarimax_manual_final.select('series','Forecaster','Drivers_Used_Flag', 'Driver','DRV'), allowMissingColumns=True
+        )
+        .unionByName(
+            prophet.select('series','Forecaster','Drivers_Used_Flag', 'Driver','DRV'), allowMissingColumns=True
+        )
+        .unionByName(
+            xgb.withColumn("Forecaster", lit("XGBoost")), allowMissingColumns=True
+        )
+        .unionByName(
+            (
+                tft
+                .withColumn("Forecaster", lit("TFT"))
+            ), 
+            allowMissingColumns=True
+        )
+    ).select('series','Forecaster', 'Drivers_Used_Flag','Driver','DRV').withColumn('Forecast_Level', lit(level))
+
+    return auto_drv_final
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+level = ''
+if Topline:
+    level="Topline"
+else:
+    level = "Middle"
+
+
+auto_final = join_dfs(arimax_auto_final, sarimax_auto_final, prophet_automated_drv, xgb_auto_drv, tft_auto_drv, level)
+auto_final = auto_final.filter(~col('DRV').isin('year','quarter','month_cos','month_sin'))
+display(auto_final.limit(3))
+
+manual_final = join_dfs(arimax_manual_final, sarimax_manual_final, prophet_manual_drv, xgb_manual_drv, tft_manual_drv, level)
+manual_final = manual_final.filter(~col('DRV').isin('year','quarter','month_cos','month_sin'))
+display(manual_final.limit(3))
+
+
+final_df = auto_final.unionByName(manual_final)
+display(final_df.limit(3))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+final_df.write.mode('overwrite').parquet(output_dir+'Driver_Analysis.parquet')
+final_df.write.format('delta').mode('overwrite').saveAsTable(output_table + "driver_analysis")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+temp = spark.read.parquet('abfss://991f5e4b-c174-4ff2-992e-feb17d49d25a@onelake.dfs.fabric.microsoft.com/22746de3-183e-4327-a844-dceda0b7165c/Files/Eval/Middle/Driver_Analysis.parquet')
+temp.write.format('delta').mode('overwrite').saveAsTable("Sales_Forecasting.Middle_Eval.driver_analysis")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## Looking into the outputs
+
+# CELL ********************
+
+output_table
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+final_df = spark.read.parquet(output_dir+"Driver_Analysis.parquet")
+display(final_df.filter(col('Forecaster')=='TFT'))
+
+display(final_df.filter(col('Forecaster')=='XGBoost'))
+
+display(final_df.filter(col('Forecaster')=='Prophet'))
+
+display(final_df.filter(col('Forecaster')=='ARIMAX'))
+
+display(final_df.filter(col('Forecaster')=='SARIMAX'))
 
 
 # METADATA ********************
