@@ -38,7 +38,7 @@ from pyspark.sql.window import Window
 # CELL ********************
 
 ## Parameters
-Topline = False
+Topline = True
 
 # METADATA ********************
 
@@ -127,6 +127,7 @@ else:
 
 all_forecast_dfs = []
 for file_dir in all_forecast_dirs:
+    print(file_dir)
     temp_file = spark.read.parquet(file_dir).select(*ACT_GRP_COLS, 'Training_End_Date','Date','Forecast_Horizon','Forecast','Forecaster','Drivers_Used_Flag')
     all_forecast_dfs.append(temp_file)
 
@@ -136,6 +137,7 @@ unioned_dfs = reduce(
 )
 unioned_dfs.cache()
 
+display(unioned_dfs)
 
 
 # METADATA ********************
@@ -190,16 +192,21 @@ key_table = compiled_values.select('identifier_col',*ACT_GRP_COLS, 'Forecaster',
 # CELL ********************
 
 baseline = unioned_dfs.filter(col('Forecaster')=='Seasonal_Baseline').withColumn('identifier_col', concat_ws('___', *ACT_GRP_COLS, 'Forecaster','Drivers_Used_Flag'))
+
+
 unioned_filtered_dfs = unioned_dfs.filter(col('Forecaster')!='Seasonal_Baseline').withColumn('identifier_col', concat_ws('___', *ACT_GRP_COLS, 'Forecaster','Drivers_Used_Flag'))
 
 
 actuals_metric_df = actuals_df.withColumnRenamed('Quantity','Actuals')
+
 
 unioned_actuals_df = actuals_metric_df.join(
     unioned_filtered_dfs,
     [*ACT_GRP_COLS,'Date'],
     'inner'
 )
+
+
 
 baseline_actuals = baseline.join(
     actuals_metric_df,
@@ -217,13 +224,14 @@ eval_table = (
     .withColumn('Forecast_Abs_Error', abs(col('Actuals')-col('Forecast')))
 )
 
+
 eval_table = eval_table.join(
     baseline_actuals.select(*ACT_GRP_COLS, 'Date','Training_End_Date', 'Forecast_Horizon','Baseline_Abs_Error'),
     [*ACT_GRP_COLS, 'Date','Training_End_Date','Forecast_Horizon'],
     'inner'
 )
 
-display(eval_table)
+
 
 # METADATA ********************
 
@@ -518,6 +526,36 @@ model_series_fh_metrics.write.mode('overwrite').saveAsTable(output_table+'model_
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
 # MARKDOWN ********************
 
 # ## Driver Impact Analysis  
@@ -601,6 +639,75 @@ def arimax_drv(drv_dir):
         .filter(col('series_drv_rank')<=5)
     )
     return arimax_final
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+temp_eval = spark.read.table("Sales_Forecasting.Topline_Eval.driver_analysis")
+display(temp_eval.limit(1))
+# display(
+#     temp_eval
+#     .filter(col("Drivers_Used_Flag")=="Automated_Drivers")
+#     .groupBy('DRV')
+#     .agg(count('*').alias('drv_count'))
+#     .orderBy(desc('drv_count'))
+# )
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+display(
+    temp_eval
+    .filter(col('Drivers_Used_Flag')=='Manual_Drivers')
+    .groupBy('series','DRV')
+    .agg(count('*').alias('drv_count'))
+    .orderBy(asc("series"), desc('drv_count'))
+)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+
+temp = (
+    temp_eval
+    .withColumn('Region', split(col('series'),'___').getItem(1))
+    .withColumn('Product_Category', split(col('series'),'___').getItem(0))
+)
+display(
+    temp
+    .filter(col("Drivers_Used_Flag")=="Manual_Drivers")
+    .groupBy('Product_Category','DRV')
+    .agg(count('*').alias('drv_count'))
+    .orderBy(asc('Product_Category'),desc('drv_count'))
+)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # METADATA ********************
 

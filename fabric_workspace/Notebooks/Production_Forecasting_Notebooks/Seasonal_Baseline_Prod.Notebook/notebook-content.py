@@ -111,6 +111,21 @@ target_col = 'Value'
 
 # CELL ********************
 
+print(actuals_table)
+print(initial_target_col)
+print(DRV_GRP_COLS)
+print(ACT_GRP_COLS)
+print(Seasonal_Baseline_dir)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 actuals = spark.read.table(actuals_table).withColumnRenamed(initial_target_col,target_col)
 
 # METADATA ********************
@@ -401,6 +416,16 @@ forecasts = (
 )
 
 forecasts.write.mode('overwrite').parquet(Seasonal_Baseline_dir)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # METADATA ********************
 

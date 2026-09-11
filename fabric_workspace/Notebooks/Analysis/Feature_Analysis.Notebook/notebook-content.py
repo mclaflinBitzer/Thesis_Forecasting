@@ -45,7 +45,7 @@ ml_features = spark.createDataFrame(
 )
 
 dl_features = spark.createDataFrame(
-    pd.read_excel(base_folder + "/Topline/topline_dl_selected_feature.xlsx")
+    pd.read_excel(base_folder + "/Middle/middle_dl_selected_feature.xlsx")
 )
 
 
@@ -58,52 +58,9 @@ dl_features = spark.createDataFrame(
 
 # CELL ********************
 
-display(dl_features.groupBy('Product_Category').agg(countDistinct('Indicator')))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(classic_features.groupBy('Product_Category','Region').agg(countDistinct('Feature')))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-dl_new = dl_features.filter(col('rank')<=30)
-display(dl_new.groupBy('Product_Category','Region').agg(countDistinct('Indicator')))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
+display(classic_features.limit(10))
+display(ml_features.limit(10))
 display(dl_features.limit(10))
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-display(dl_features.groupBy('Product_Category','Region').agg(countDistinct('Indicator')))
 
 # METADATA ********************
 
